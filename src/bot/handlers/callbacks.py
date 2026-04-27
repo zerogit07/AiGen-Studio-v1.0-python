@@ -782,6 +782,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if data == "admin_model":
         if not is_user_admin(user_id, state):
             return
+        try:
+            await query.edit_message_text(text="\U0001f9e0 *Manajemen Model*", parse_mode="Markdown", reply_markup=get_model_management_keyboard())
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="\U0001f9e0 *Manajemen Model*", parse_mode="Markdown", reply_markup=get_model_management_keyboard())
+        return
+
+    if data == "toggle_model_btn":
+        if not is_user_admin(user_id, state):
+            return
         msg, kb = get_manage_models_keyboard(model_manager.get_all_models_with_status())
         try:
             await query.edit_message_text(text=msg, parse_mode="Markdown", reply_markup=kb)
@@ -801,13 +810,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data == "toggle_maintenance":
         new_state = await model_manager.toggle_maintenance()
-        msg, kb = get_manage_models_keyboard(model_manager.get_all_models_with_status())
-        status = "🟢 ON" if new_state else "🔴 OFF"
-        msg += f"\n\n🚧 *Maintenance Mode:* {status}"
         try:
-            await query.edit_message_text(text=msg, parse_mode="Markdown", reply_markup=kb)
+            status = "\U0001f7e2 ON" if new_state else "\U0001f534 OFF"
+            await query.edit_message_text(text=f"\U0001f9e0 *Manajemen Model*\n\n\U0001f6a7 *Maintenance Mode:* {status}", parse_mode="Markdown", reply_markup=get_model_management_keyboard())
         except Exception:
-            await context.bot.send_message(chat_id=chat_id, text=f"🚧 *Maintenance Mode:* {status}", parse_mode="Markdown")
+            status = "\U0001f7e2 ON" if new_state else "\U0001f534 OFF"
+            await context.bot.send_message(chat_id=chat_id, text=f"\U0001f6a7 *Maintenance Mode:* {status}", parse_mode="Markdown")
         return
 
     # Member Management
