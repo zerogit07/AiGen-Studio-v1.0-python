@@ -281,6 +281,7 @@ MODEL_HANDLERS = {
 
 
 async def submit_video_generation(params: GenerateParams) -> dict:
+    """POST - Create task (generate video/image)."""
     model_id = params.model_id
     config = MODEL_CONFIG.get(model_id)
     if not config:
@@ -295,3 +296,27 @@ async def submit_video_generation(params: GenerateParams) -> dict:
 
     logger.info("[%s] Submitting to %s", model_id, endpoint)
     return await handler(params, config, endpoint, status_path)
+
+
+async def get_task_status(model_id: str, task_id: str, api_key: str) -> dict:
+    """GET - Get single task status by task_id."""
+    config = MODEL_CONFIG.get(model_id)
+    if not config:
+        raise RuntimeError(f"Model configuration not found for: {model_id}")
+
+    status_path = config.status_path
+    url = f"{BASE_URL}/{status_path}/{task_id}"
+    logger.info("[%s] Getting task status: %s", model_id, task_id)
+    return await request_engine(method="GET", url=url, force_api_key=api_key)
+
+
+async def list_tasks(model_id: str, api_key: str) -> dict:
+    """GET - List all tasks for a model."""
+    config = MODEL_CONFIG.get(model_id)
+    if not config:
+        raise RuntimeError(f"Model configuration not found for: {model_id}")
+
+    status_path = config.status_path
+    url = f"{BASE_URL}/{status_path}"
+    logger.info("[%s] Listing all tasks", model_id)
+    return await request_engine(method="GET", url=url, force_api_key=api_key)
