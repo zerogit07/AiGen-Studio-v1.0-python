@@ -62,7 +62,8 @@ async def post_init(application: Application) -> None:
     )
     logger.info("All data loaded successfully.")
 
-    # Set bot commands
+    # Clear and re-set bot commands
+    await application.bot.delete_my_commands()
     await application.bot.set_my_commands([
         ("start", "Menu Utama"),
         ("admin", "Panel Admin"),
