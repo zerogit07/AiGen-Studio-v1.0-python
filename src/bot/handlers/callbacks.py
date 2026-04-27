@@ -679,24 +679,43 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data == "enable_all_keys":
         await api_key_manager.enable_all()
-        await context.bot.send_message(chat_id=chat_id, text="🟢 Semua key diaktifkan!")
+        keys = api_key_manager.get_all_keys()
+        now = int(time.time() * 1000)
+        active = sum(1 for k in keys if k.active and k.cooldown_until < now)
+        cooldown = sum(1 for k in keys if k.active and k.cooldown_until >= now)
+        dead = sum(1 for k in keys if not k.active)
+        msg, kb = get_api_key_dashboard(keys, active, cooldown, dead)
+        try:
+            await query.edit_message_text(text=msg, parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="🟢 Semua key diaktifkan!")
         return
 
     if data == "manage_keys":
-        await context.bot.send_message(chat_id=chat_id, text="🔑 *Manajemen Key*", parse_mode="Markdown", reply_markup=get_manage_keys_keyboard())
+        try:
+            await query.edit_message_text(text="🔑 *Manajemen Key*", parse_mode="Markdown", reply_markup=get_manage_keys_keyboard())
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="🔑 *Manajemen Key*", parse_mode="Markdown", reply_markup=get_manage_keys_keyboard())
         return
 
     if data == "list_keys_btn":
         keys = api_key_manager.get_all_keys()
+        back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Kembali", callback_data="api_mgmt_menu")]])
         if not keys:
-            await context.bot.send_message(chat_id=chat_id, text="❌ Tidak ada API key tersimpan.")
+            try:
+                await query.edit_message_text(text="❌ Tidak ada API key tersimpan.", reply_markup=back_kb)
+            except Exception:
+                await context.bot.send_message(chat_id=chat_id, text="❌ Tidak ada API key tersimpan.", reply_markup=back_kb)
             return
         now = int(time.time() * 1000)
         lines = ["*Daftar API Key:*\n"]
         for i, k in enumerate(keys, 1):
             status = "ON" if k.active and k.cooldown_until < now else ("CD" if k.active else "OFF")
             lines.append(f"{i}. `{k.key[:12]}...` [{status}]")
-        await context.bot.send_message(chat_id=chat_id, text="\n".join(lines), parse_mode="Markdown")
+        try:
+            await query.edit_message_text(text="\n".join(lines), parse_mode="Markdown", reply_markup=back_kb)
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="\n".join(lines), parse_mode="Markdown", reply_markup=back_kb)
         return
 
     # Proxy Management
@@ -726,22 +745,37 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data == "manage_proxies":
-        await context.bot.send_message(chat_id=chat_id, text="🌐 *Manajemen Proxy*", parse_mode="Markdown", reply_markup=get_manage_proxies_keyboard())
+        try:
+            await query.edit_message_text(text="🌐 *Manajemen Proxy*", parse_mode="Markdown", reply_markup=get_manage_proxies_keyboard())
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="🌐 *Manajemen Proxy*", parse_mode="Markdown", reply_markup=get_manage_proxies_keyboard())
         return
 
     if data == "enable_all_proxies":
         await proxy_manager.enable_all()
-        await context.bot.send_message(chat_id=chat_id, text="🟢 Semua proxy diaktifkan!")
+        msg, kb = get_proxy_dashboard(proxy_manager.get_all_proxies())
+        try:
+            await query.edit_message_text(text=msg, parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="🟢 Semua proxy diaktifkan!")
         return
 
     if data == "disable_all_proxies":
         await proxy_manager.disable_all()
-        await context.bot.send_message(chat_id=chat_id, text="🔴 Semua proxy dinonaktifkan!")
+        msg, kb = get_proxy_dashboard(proxy_manager.get_all_proxies())
+        try:
+            await query.edit_message_text(text=msg, parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="🔴 Semua proxy dinonaktifkan!")
         return
 
     if data == "delete_all_proxies":
         await proxy_manager.delete_all()
-        await context.bot.send_message(chat_id=chat_id, text="🗑 Semua proxy dihapus!")
+        msg, kb = get_proxy_dashboard(proxy_manager.get_all_proxies())
+        try:
+            await query.edit_message_text(text=msg, parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="🗑 Semua proxy dihapus!")
         return
 
     # Model Management
@@ -767,8 +801,13 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data == "toggle_maintenance":
         new_state = await model_manager.toggle_maintenance()
+        msg, kb = get_manage_models_keyboard(model_manager.get_all_models_with_status())
         status = "🟢 ON" if new_state else "🔴 OFF"
-        await context.bot.send_message(chat_id=chat_id, text=f"🚧 *Maintenance Mode:* {status}", parse_mode="Markdown")
+        msg += f"\n\n🚧 *Maintenance Mode:* {status}"
+        try:
+            await query.edit_message_text(text=msg, parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text=f"🚧 *Maintenance Mode:* {status}", parse_mode="Markdown")
         return
 
     # Member Management
@@ -811,17 +850,28 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         msg += f"\n\n*Global Stats:*\n- Total video: {global_stats.total_videos}\n"
         for m_id, count in global_stats.model_usage.items():
             msg += f"  - {m_id}: {count}\n"
-        await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode="Markdown")
+        back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Kembali", callback_data="admin_stats")]])
+        try:
+            await query.edit_message_text(text=msg, parse_mode="Markdown", reply_markup=back_kb)
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text=msg, parse_mode="Markdown", reply_markup=back_kb)
         return
 
     if data == "admin_stats_logs":
+        back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Kembali", callback_data="admin_stats")]])
         if not global_logs:
-            await context.bot.send_message(chat_id=chat_id, text="📋 Belum ada log aktivitas.")
+            try:
+                await query.edit_message_text(text="📋 Belum ada log aktivitas.", reply_markup=back_kb)
+            except Exception:
+                await context.bot.send_message(chat_id=chat_id, text="📋 Belum ada log aktivitas.", reply_markup=back_kb)
             return
         lines = ["*Log Aktivitas Terbaru:*\n"]
         for log in global_logs[:20]:
             lines.append(f"- User `{log.user_id}` | {log.model_id} | {log.prompt[:30]}")
-        await context.bot.send_message(chat_id=chat_id, text="\n".join(lines), parse_mode="Markdown")
+        try:
+            await query.edit_message_text(text="\n".join(lines), parse_mode="Markdown", reply_markup=back_kb)
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="\n".join(lines), parse_mode="Markdown", reply_markup=back_kb)
         return
 
     if data == "admin_stats_check_user":
@@ -932,5 +982,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         keys = api_key_manager.get_all_keys()
         proxies = proxy_manager.get_all_proxies()
         backup = f"Members: {len(members)}\nKeys: {len(keys)}\nProxies: {len(proxies)}"
-        await context.bot.send_message(chat_id=chat_id, text=f"*Backup Data:*\n\n{backup}", parse_mode="Markdown")
+        back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Kembali", callback_data="admin_backup_mgmt")]])
+        try:
+            await query.edit_message_text(text=f"*Backup Data:*\n\n{backup}", parse_mode="Markdown", reply_markup=back_kb)
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text=f"*Backup Data:*\n\n{backup}", parse_mode="Markdown", reply_markup=back_kb)
         return
