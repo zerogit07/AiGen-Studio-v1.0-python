@@ -18,7 +18,15 @@ async def request_engine(
     json_data: dict | None = None,
     force_api_key: str | None = None,
 ) -> dict:
-    """Resilient request wrapper with API key rotation and proxy support."""
+    """Resilient request wrapper with API key rotation and proxy support.
+
+    Handles only documented Freepik API response codes:
+    - 200: Success
+    - 400: Bad Request (parameter invalid)
+    - 401: Unauthorized (API key invalid/missing)
+    - 500: Internal Server Error
+    - 503: Service Unavailable
+    """
     last_error: Exception | None = None
     now = int(time.time() * 1000)
 
@@ -54,7 +62,7 @@ async def request_engine(
             keys_to_try.append(forced)
 
     if not keys_to_try:
-        raise RuntimeError("402 - Semua API Key sedang sibuk atau habis kuota")
+        raise RuntimeError("Semua API Key sedang sibuk atau tidak tersedia")
 
     for api_key_obj in keys_to_try:
         api_key = api_key_obj.key
@@ -94,30 +102,48 @@ async def request_engine(
                 status = exc.response.status_code
 
                 if status == 400:
+                    # Bad Request — parameter tidak valid, langsung raise
                     detail = exc.response.text
                     raise RuntimeError(f"{status} - {detail}") from exc
-                elif status == 402:
-                    logger.warning(
-                        "[Quota Error] Key %s exhausted (402). Disabling.", api_key[:8]
-                    )
-                    await api_key_manager.mark_key_dead(api_key)
-                    skip_to_next_key = True
-                    break
-                elif status in (401, 403):
-                    logger.error("[Key Dead] %s status %d", api_key[:8], status)
-                    await api_key_manager.mark_key_dead(api_key)
-                    skip_to_next_key = True
-                    break
-                elif status == 429:
-                    logger.warning(
-                        "[Rate Limit] Key %s hit 429. Disabling.", api_key[:8]
+
+                elif status == 401:
+                    # Unauthorized — API key tidak valid, mark dead, coba key lain
+                    logger.error(
+                        "[Unauthorized] Key %s invalid (401). Disabling.",
+                        api_key[:8],
                     )
                     await api_key_manager.mark_key_dead(api_key)
                     skip_to_next_key = True
                     break
 
+                elif status == 500:
+                    # Internal Server Error — coba proxy lain
+                    logger.error(
+                        "[Server Error] 500 from API with key %s", api_key[:8]
+                    )
+                    if proxy_url:
+                        await proxy_manager.set_cooldown(proxy_url)
+                    continue
+
+                elif status == 503:
+                    # Service Unavailable — coba proxy lain
+                    logger.warning(
+                        "[Service Unavailable] 503 from API with key %s",
+                        api_key[:8],
+                    )
+                    if proxy_url:
+                        await proxy_manager.set_cooldown(proxy_url)
+                    continue
+
+                # Unexpected status code — log dan coba lagi
+                logger.warning(
+                    "[Unexpected] Status %d from API with key %s",
+                    status,
+                    api_key[:8],
+                )
                 if proxy_url:
                     await proxy_manager.set_cooldown(proxy_url)
+
             except Exception as exc:
                 last_error = exc
                 if proxy_url:
@@ -151,7 +177,7 @@ async def request_engine(
             status = exc.response.status_code
             if status == 400:
                 raise RuntimeError(f"{status} - {exc.response.text}") from exc
-            elif status in (401, 402, 403, 429):
+            elif status == 401:
                 await api_key_manager.mark_key_dead(api_key)
                 continue
         except Exception as exc:
