@@ -613,8 +613,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data == "free_trial":
+        existing = await member_manager.sync_member(user_id)
+        if existing:
+            await context.bot.send_message(chat_id=chat_id, text="\u274c Anda sudah pernah menggunakan Free Trial.")
+            return
         await member_manager.add_member(user_id, "testing", days=30, testing_quota=3)
-        await context.bot.send_message(chat_id=chat_id, text="🎁 *FREE TRIAL AKTIF!*\n\nAnda mendapat 3 kuota percobaan gratis.", parse_mode="Markdown")
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        await context.bot.send_message(chat_id=chat_id, text="\U0001f381 *FREE TRIAL AKTIF!*\n\nAnda mendapat 3 kuota percobaan gratis.", parse_mode="Markdown")
         await handle_start_command(update, context, is_edit=False)
         return
 
@@ -626,16 +634,18 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if data == "show_plans":
         banner_url = landing_page_manager.get_setting("bannerImage")
         description = landing_page_manager.get_setting("bannerDescription")
+        existing = await member_manager.sync_member(user_id)
+        bottom_row = []
+        if not existing:
+            bottom_row.append(InlineKeyboardButton("\U0001f381 Free Trial", callback_data="free_trial"))
+        bottom_row.append(InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="back_main"))
         keyboard = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("\U0001f331 Lite", callback_data="lite"),
                 InlineKeyboardButton("\u2b50 Pro", callback_data="pro"),
                 InlineKeyboardButton("\U0001f48e Ultra", callback_data="ultra"),
             ],
-            [
-                InlineKeyboardButton("\U0001f381 Free Trial", callback_data="free_trial"),
-                InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="back_main"),
-            ],
+            bottom_row,
         ])
         try:
             await query.message.delete()
