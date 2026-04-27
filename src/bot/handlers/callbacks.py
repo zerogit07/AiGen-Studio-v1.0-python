@@ -624,7 +624,28 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data == "show_plans":
-        await handle_start_command(update, context, is_edit=True)
+        banner_url = landing_page_manager.get_setting("bannerImage")
+        description = landing_page_manager.get_setting("bannerDescription")
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("\U0001f331 Lite", callback_data="lite"),
+                InlineKeyboardButton("\u2b50 Pro", callback_data="pro"),
+                InlineKeyboardButton("\U0001f48e Ultra", callback_data="ultra"),
+            ],
+            [InlineKeyboardButton("\U0001f381 Free Trial", callback_data="free_trial")],
+            [InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="back_main")],
+        ])
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        await context.bot.send_photo(
+            chat_id=chat_id,
+            photo=banner_url,
+            caption=description,
+            parse_mode="Markdown",
+            reply_markup=keyboard,
+        )
         return
 
     if data == "back_main":
