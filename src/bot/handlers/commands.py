@@ -45,14 +45,19 @@ async def handle_start_command(
         banner_url = landing_page_manager.get_setting("bannerImage")
         description = landing_page_manager.get_setting("bannerDescription")
 
-        keyboard = InlineKeyboardMarkup([
+        rows = [
             [
                 InlineKeyboardButton("\U0001f331 Lite", callback_data="lite"),
                 InlineKeyboardButton("\u2b50 Pro", callback_data="pro"),
                 InlineKeyboardButton("\U0001f48e Ultra", callback_data="ultra"),
             ],
-            [InlineKeyboardButton("\U0001f381 Free Trial", callback_data="free_trial")],
-        ])
+        ]
+        if not member_data:
+            rows.append([InlineKeyboardButton("\U0001f381 Free Trial", callback_data="free_trial")])
+        else:
+            rows.append([InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="back_main")])
+
+        keyboard = InlineKeyboardMarkup(rows)
 
         if is_edit:
             try:
