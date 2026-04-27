@@ -80,30 +80,30 @@ async def _send_request(endpoint: str, status_path: str, payload: dict) -> dict:
 
 
 async def _handle_motion(params: GenerateParams, config: ModelConfig, endpoint: str, status_path: str) -> dict:
-    payload: dict = {"prompt": params.prompt}
-    int_duration = int(params.duration or "5")
+    payload: dict = {}
+    if params.prompt:
+        payload["prompt"] = params.prompt
     if params.image_base64:
-        payload["image"] = params.image_base64
+        payload["image_url"] = params.image_base64
     elif params.image_url:
-        payload["image"] = params.image_url
-    if "kling_2_6_motion" in params.model_id:
-        payload["generate_audio"] = params.generate_audio
-    if config.needs_orientation:
-        payload["orientation"] = params.orientation or "video"
-    if config.needs_duration:
-        payload["duration"] = str(int_duration)
+        payload["image_url"] = params.image_url
+    if params.video_url:
+        payload["video_url"] = params.video_url
+    payload["character_orientation"] = params.orientation or "video"
     return await _send_request(endpoint, status_path, payload)
 
 
 async def _handle_kling_2_5_turbo(params: GenerateParams, config: ModelConfig, endpoint: str, status_path: str) -> dict:
-    payload: dict = {"prompt": params.prompt}
+    payload: dict = {}
     int_duration = int(params.duration or "5")
+    if config.needs_duration:
+        payload["duration"] = str(int_duration)
     if params.image_base64:
         payload["image"] = params.image_base64
     elif params.image_url:
         payload["image"] = params.image_url
-    if config.needs_duration:
-        payload["duration"] = str(int_duration)
+    if params.prompt:
+        payload["prompt"] = params.prompt
     return await _send_request(endpoint, status_path, payload)
 
 
@@ -231,19 +231,18 @@ async def _handle_kling_2_6_pro(params: GenerateParams, config: ModelConfig, end
 
 
 async def _handle_kling_2_1(params: GenerateParams, config: ModelConfig, endpoint: str, status_path: str) -> dict:
-    ratio = _normalize_ratio(params.aspect_ratio)
-    payload: dict = {"prompt": params.prompt}
+    payload: dict = {}
     int_duration = int(params.duration or "5")
     if config.needs_duration:
         payload["duration"] = str(int_duration)
-    if config.needs_aspect_ratio:
-        payload["aspect_ratio"] = ratio
     if params.image_base64:
-        payload["first_frame"] = params.image_base64
+        payload["image"] = params.image_base64
     elif params.image_url:
-        payload["first_frame"] = params.image_url
-    if params.generate_audio:
-        payload["generate_audio"] = True
+        payload["image"] = params.image_url
+    if params.image_url_last:
+        payload["image_tail"] = params.image_url_last
+    if params.prompt:
+        payload["prompt"] = params.prompt
     return await _send_request(endpoint, status_path, payload)
 
 
