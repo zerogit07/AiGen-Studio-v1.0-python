@@ -66,7 +66,6 @@ async def post_init(application: Application) -> None:
     await application.bot.set_my_commands([
         ("start", "Menu Utama"),
         ("admin", "Panel Admin"),
-        ("reset", "Reset Proses"),
     ])
 
     # Start background state cleaner
