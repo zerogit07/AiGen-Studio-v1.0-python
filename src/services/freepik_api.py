@@ -4,10 +4,12 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
-from src.core.constants import MODEL_CONFIG
+from src.core.constants import MODEL_CONFIG, ModelConfig
 from src.services.request_engine import request_engine
 
 logger = logging.getLogger(__name__)
+
+BASE_URL = "https://api.freepik.com/v1/ai"
 
 
 @dataclass
@@ -30,162 +32,256 @@ class GenerateParams:
     camera_config: Optional[dict] = None
 
 
-async def submit_video_generation(params: GenerateParams) -> dict:
-    model_id = params.model_id
-    config = MODEL_CONFIG.get(model_id)
-    if not config:
-        raise RuntimeError(f"Model configuration not found for: {model_id}")
+def _normalize_ratio(ratio: str) -> str:
+    mapping = {
+        "widescreen_16_9": "16:9",
+        "portrait_9_16": "9:16",
+        "square_1_1": "1:1",
+    }
+    return mapping.get(ratio, ratio)
 
-    endpoint = config.endpoint
-    final_status_path = config.status_path
 
-    # Dynamically adjust category if image is provided
+def _adjust_endpoint(endpoint: str, status_path: str, params: GenerateParams) -> tuple[str, str]:
     if params.image_url or params.image_base64:
         if "text-to-video" in endpoint:
             endpoint = endpoint.replace("text-to-video", "image-to-video")
-            final_status_path = final_status_path.replace("text-to-video", "image-to-video")
+            status_path = status_path.replace("text-to-video", "image-to-video")
         elif "text-to-image" in endpoint:
             endpoint = endpoint.replace("text-to-image", "image-to-image")
-            final_status_path = final_status_path.replace("text-to-image", "image-to-image")
+            status_path = status_path.replace("text-to-image", "image-to-image")
+    return endpoint, status_path
 
-    payload: dict = {}
-    int_duration = int(params.duration or "5") if params.duration else 5
 
-    # Normalize aspect ratio
-    normalized_ratio = params.aspect_ratio
-    if normalized_ratio == "widescreen_16_9":
-        normalized_ratio = "16:9"
-    elif normalized_ratio == "portrait_9_16":
-        normalized_ratio = "9:16"
-    elif normalized_ratio == "square_1_1":
-        normalized_ratio = "1:1"
+async def _send_request(endpoint: str, status_path: str, payload: dict) -> dict:
+    url = f"{BASE_URL}/{endpoint}"
+    try:
+        result = await request_engine(method="POST", url=url, json_data=payload)
+        return {
+            "data": result["data"],
+            "used_key": result["used_key"],
+            "final_endpoint": endpoint,
+            "final_status_path": status_path,
+            "error": None,
+        }
+    except RuntimeError as exc:
+        error_msg = str(exc)
+        if error_msg.startswith("400"):
+            return {
+                "error": error_msg,
+                "data": None,
+                "used_key": "",
+                "final_endpoint": endpoint,
+                "final_status_path": status_path,
+            }
+        raise
 
-    # Build payload based on model type
-    if "motion" in model_id or model_id == "kling_2_5_turbo":
-        payload = {"prompt": params.prompt}
+
+# ─── Per-Model Handlers ──────────────────────────────────
+
+
+async def _handle_motion(params: GenerateParams, config: ModelConfig, endpoint: str, status_path: str) -> dict:
+    payload: dict = {"prompt": params.prompt}
+    int_duration = int(params.duration or "5")
+    if params.image_base64:
+        payload["image"] = params.image_base64
+    elif params.image_url:
+        payload["image"] = params.image_url
+    if "kling_2_6_motion" in params.model_id:
+        payload["generate_audio"] = params.generate_audio
+    if config.needs_orientation:
+        payload["orientation"] = params.orientation or "video"
+    if config.needs_duration:
+        payload["duration"] = str(int_duration)
+    return await _send_request(endpoint, status_path, payload)
+
+
+async def _handle_kling_2_5_turbo(params: GenerateParams, config: ModelConfig, endpoint: str, status_path: str) -> dict:
+    payload: dict = {"prompt": params.prompt}
+    int_duration = int(params.duration or "5")
+    if params.image_base64:
+        payload["image"] = params.image_base64
+    elif params.image_url:
+        payload["image"] = params.image_url
+    if config.needs_duration:
+        payload["duration"] = str(int_duration)
+    return await _send_request(endpoint, status_path, payload)
+
+
+async def _handle_veo31(params: GenerateParams, config: ModelConfig, endpoint: str, status_path: str) -> dict:
+    ratio = _normalize_ratio(params.aspect_ratio)
+    int_duration = int(params.duration or "5")
+    payload: dict = {
+        "prompt": params.prompt,
+        "aspect_ratio": ratio,
+        "generate_audio": params.generate_audio,
+    }
+    if params.image_url:
+        payload["image"] = params.image_url
+    if params.mode:
+        payload["mode"] = params.mode
+    if config.needs_duration:
+        payload["duration"] = int_duration
+    return await _send_request(endpoint, status_path, payload)
+
+
+async def _handle_nano_banana(params: GenerateParams, config: ModelConfig, endpoint: str, status_path: str) -> dict:
+    ratio = _normalize_ratio(params.aspect_ratio)
+    payload: dict = {"prompt": params.prompt, "aspect_ratio": ratio}
+    res_map = {"4k": "4K", "2k": "2K", "1k": "1K"}
+    payload["resolution"] = res_map.get(params.resolution, "2K")
+    if params.image_refs:
+        payload["reference_images"] = [
+            {
+                "image": url,
+                "mime_type": (
+                    "image/png"
+                    if url.lower().endswith(".png")
+                    else "image/webp"
+                    if url.lower().endswith(".webp")
+                    else "image/jpeg"
+                ),
+            }
+            for url in params.image_refs[:3]
+        ]
+    if params.mode:
+        payload["mode"] = params.mode
+    return await _send_request(endpoint, status_path, payload)
+
+
+async def _handle_kling_o1(params: GenerateParams, config: ModelConfig, endpoint: str, status_path: str) -> dict:
+    ratio = _normalize_ratio(params.aspect_ratio)
+    int_duration = int(params.duration or "5")
+    if params.mode == "reference":
+        payload: dict = {
+            "prompt": params.prompt,
+            "aspect_ratio": ratio,
+            "duration": int_duration,
+        }
+        refs: list[str] = []
         if params.image_base64:
-            payload["image"] = params.image_base64
+            refs.append(params.image_base64)
         elif params.image_url:
-            payload["image"] = params.image_url
-        if "kling_2_6_motion" in model_id:
-            payload["generate_audio"] = params.generate_audio
-        if config.needs_orientation:
-            payload["orientation"] = params.orientation or "video"
-        if config.needs_duration:
-            payload["duration"] = str(int_duration)
-
-    elif "veo_3_1" in model_id or "nano_" in model_id:
-        payload = {"prompt": params.prompt, "aspect_ratio": normalized_ratio}
-        if "veo_3_1" in model_id:
-            payload["generate_audio"] = params.generate_audio
-            if params.image_url:
-                payload["image"] = params.image_url
-        elif "nano_" in model_id:
-            res_map = {"4k": "4K", "2k": "2K", "1k": "1K"}
-            payload["resolution"] = res_map.get(params.resolution, "2K")
-            if params.image_refs:
-                payload["reference_images"] = [
-                    {
-                        "image": url,
-                        "mime_type": (
-                            "image/png"
-                            if url.lower().endswith(".png")
-                            else "image/webp"
-                            if url.lower().endswith(".webp")
-                            else "image/jpeg"
-                        ),
-                    }
-                    for url in params.image_refs[:3]
-                ]
-        if params.mode:
-            payload["mode"] = params.mode
-
-    elif "kling_o1" in model_id:
-        if params.mode == "reference":
-            payload = {
-                "prompt": params.prompt,
-                "aspect_ratio": normalized_ratio,
-                "duration": int_duration,
-            }
-            refs: list[str] = []
-            if params.image_base64:
-                refs.append(params.image_base64)
-            elif params.image_url:
-                refs.append(params.image_url)
-            if params.image_refs:
-                refs.extend(params.image_refs)
-            if refs:
-                payload["reference_images"] = refs[:7]
-        else:
-            payload = {
-                "prompt": params.prompt,
-                "aspect_ratio": normalized_ratio,
-                "duration": int_duration,
-            }
-            if params.image_base64:
-                payload["first_frame"] = params.image_base64
-            elif params.image_url:
-                payload["first_frame"] = params.image_url
-            if params.image_url_last:
-                payload["last_frame"] = params.image_url_last
-
-    elif "kling_v3" in model_id and "motion" not in model_id:
-        payload = {"prompt": params.prompt}
-        if config.needs_duration:
-            payload["duration"] = int_duration
+            refs.append(params.image_url)
+        if params.image_refs:
+            refs.extend(params.image_refs)
+        if refs:
+            payload["reference_images"] = refs[:7]
+    else:
+        payload = {
+            "prompt": params.prompt,
+            "aspect_ratio": ratio,
+            "duration": int_duration,
+        }
         if params.image_base64:
             payload["first_frame"] = params.image_base64
         elif params.image_url:
             payload["first_frame"] = params.image_url
         if params.image_url_last:
             payload["last_frame"] = params.image_url_last
-        if params.image_refs:
-            payload["element_images"] = params.image_refs[:3]
-        if params.generate_audio:
-            payload["generate_audio"] = True
-        if params.shots and params.kling3_mode in ("multi_intelligence", "multi_customize"):
-            payload["shots"] = [
-                {"prompt": s.get("prompt", ""), "duration": s.get("duration", 5)}
-                for s in params.shots
-            ]
-        if params.camera_config:
-            payload["camera_control"] = params.camera_config
+    return await _send_request(endpoint, status_path, payload)
 
-    else:
-        # Kling 2.1 and others
-        payload = {"prompt": params.prompt}
-        if config.needs_duration:
-            payload["duration"] = str(int_duration)
-        if config.needs_aspect_ratio:
-            payload["aspect_ratio"] = normalized_ratio
-        if params.image_base64:
-            payload["first_frame"] = params.image_base64
-        elif params.image_url:
-            payload["first_frame"] = params.image_url
-        if params.generate_audio:
-            payload["generate_audio"] = True
 
-    # Add duration for veo models
-    if "veo_3_1" in model_id and config.needs_duration:
+async def _handle_kling_v3(params: GenerateParams, config: ModelConfig, endpoint: str, status_path: str) -> dict:
+    payload: dict = {"prompt": params.prompt}
+    int_duration = int(params.duration or "5")
+    if config.needs_duration:
         payload["duration"] = int_duration
+    if params.image_base64:
+        payload["first_frame"] = params.image_base64
+    elif params.image_url:
+        payload["first_frame"] = params.image_url
+    if params.image_url_last:
+        payload["last_frame"] = params.image_url_last
+    if params.image_refs:
+        payload["element_images"] = params.image_refs[:3]
+    if params.generate_audio:
+        payload["generate_audio"] = True
+    if params.shots and params.kling3_mode in ("multi_intelligence", "multi_customize"):
+        payload["shots"] = [
+            {"prompt": s.get("prompt", ""), "duration": s.get("duration", 5)}
+            for s in params.shots
+        ]
+    if params.camera_config:
+        payload["camera_control"] = params.camera_config
+    return await _send_request(endpoint, status_path, payload)
 
-    url = f"https://api.freepik.com/v1/ai/{endpoint}"
 
-    try:
-        result = await request_engine(
-            method="POST",
-            url=url,
-            json_data=payload,
-        )
-        return {
-            "data": result["data"],
-            "used_key": result["used_key"],
-            "final_endpoint": endpoint,
-            "final_status_path": final_status_path,
-            "error": None,
-        }
-    except RuntimeError as exc:
-        error_msg = str(exc)
-        if error_msg.startswith("400"):
-            return {"error": error_msg, "data": None, "used_key": "", "final_endpoint": endpoint, "final_status_path": final_status_path}
-        raise
+async def _handle_kling_2_6_pro(params: GenerateParams, config: ModelConfig, endpoint: str, status_path: str) -> dict:
+    payload: dict = {"prompt": params.prompt}
+    int_duration = int(params.duration or "5")
+    if config.needs_duration:
+        payload["duration"] = str(int_duration)
+    if params.image_base64:
+        payload["first_frame"] = params.image_base64
+    elif params.image_url:
+        payload["first_frame"] = params.image_url
+    if params.generate_audio:
+        payload["generate_audio"] = True
+    return await _send_request(endpoint, status_path, payload)
+
+
+async def _handle_kling_2_1(params: GenerateParams, config: ModelConfig, endpoint: str, status_path: str) -> dict:
+    ratio = _normalize_ratio(params.aspect_ratio)
+    payload: dict = {"prompt": params.prompt}
+    int_duration = int(params.duration or "5")
+    if config.needs_duration:
+        payload["duration"] = str(int_duration)
+    if config.needs_aspect_ratio:
+        payload["aspect_ratio"] = ratio
+    if params.image_base64:
+        payload["first_frame"] = params.image_base64
+    elif params.image_url:
+        payload["first_frame"] = params.image_url
+    if params.generate_audio:
+        payload["generate_audio"] = True
+    return await _send_request(endpoint, status_path, payload)
+
+
+# ─── Model Router ─────────────────────────────────────────
+
+
+MODEL_HANDLERS = {
+    "kling_v3": _handle_kling_v3,
+    "kling_v3_pro": _handle_kling_v3,
+    "kling_v3_std": _handle_kling_v3,
+    "kling_v3_omni": _handle_kling_v3,
+    "kling_v3_omni_pro": _handle_kling_v3,
+    "kling_v3_omni_std": _handle_kling_v3,
+    "kling_v3_motion": _handle_motion,
+    "kling_v3_motion_pro": _handle_motion,
+    "kling_v3_motion_std": _handle_motion,
+    "kling_2_6_pro": _handle_kling_2_6_pro,
+    "kling_2_6_motion": _handle_motion,
+    "kling_2_6_motion_pro": _handle_motion,
+    "kling_2_6_motion_std": _handle_motion,
+    "kling_2_5_turbo": _handle_kling_2_5_turbo,
+    "kling_2_1": _handle_kling_2_1,
+    "kling_2_1_pro": _handle_kling_2_1,
+    "kling_2_1_std": _handle_kling_2_1,
+    "kling_o1": _handle_kling_o1,
+    "kling_o1_pro": _handle_kling_o1,
+    "kling_o1_std": _handle_kling_o1,
+    "veo_3_1": _handle_veo31,
+    "veo_3_1_standard": _handle_veo31,
+    "veo_3_1_fast": _handle_veo31,
+    "veo_3_1_ingredient": _handle_veo31,
+    "nano_banana_flash": _handle_nano_banana,
+    "nano_banana_pro": _handle_nano_banana,
+}
+
+
+async def submit_video_generation(params: GenerateParams) -> dict:
+    model_id = params.model_id
+    config = MODEL_CONFIG.get(model_id)
+    if not config:
+        raise RuntimeError(f"Model configuration not found for: {model_id}")
+
+    endpoint, status_path = _adjust_endpoint(config.endpoint, config.status_path, params)
+
+    handler = MODEL_HANDLERS.get(model_id)
+    if not handler:
+        logger.warning("No dedicated handler for model %s, using kling_2_1 fallback", model_id)
+        handler = _handle_kling_2_1
+
+    logger.info("[%s] Submitting to %s", model_id, endpoint)
+    return await handler(params, config, endpoint, status_path)
