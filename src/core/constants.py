@@ -172,14 +172,14 @@ MODEL_CONFIG: dict[str, ModelConfig] = {
 }
 
 DEFAULT_MODELS = [
-    {"id": "kling_v3", "name": "Kling V3"},
-    {"id": "kling_v3_motion", "name": "Kling V3 Motion"},
-    {"id": "kling_v3_omni", "name": "Kling V3 Omni"},
-    {"id": "kling_2_6_pro", "name": "Kling 2.6 Pro"},
-    {"id": "kling_2_6_motion", "name": "Kling 2.6 Motion"},
-    {"id": "kling_2_5_turbo", "name": "Kling 2.5 Turbo"},
-    {"id": "kling_2_1", "name": "Kling 2.1"},
-    {"id": "kling_o1", "name": "Kling O1"},
-    {"id": "veo_3_1", "name": "Veo 3.1"},
-    {"id": "nano_banana_flash", "name": "Nano Banana"},
+    {"id": "kling_v3", "name": "\U0001f525 Kling V3"},
+    {"id": "kling_v3_motion", "name": "\U0001f525 Kling V3 Motion"},
+    {"id": "kling_v3_omni", "name": "\U0001f525 Kling V3 Omni"},
+    {"id": "kling_2_6_pro", "name": "\U0001f3ac Kling 2.6 Pro"},
+    {"id": "kling_2_6_motion", "name": "\U0001f3ac Kling 2.6 Motion"},
+    {"id": "kling_2_5_turbo", "name": "\U0001f680 Kling 2.5 Turbo"},
+    {"id": "kling_2_1", "name": "\U0001f3ac Kling 2.1"},
+    {"id": "kling_o1", "name": "\u2728 Kling O1"},
+    {"id": "veo_3_1", "name": "\U0001f3a5 Veo 3.1"},
+    {"id": "nano_banana_flash", "name": "\U0001f34c Nano Banana"},
 ]
