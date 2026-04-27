@@ -29,7 +29,7 @@ from telegram.ext import (
 )
 
 from src.bot.handlers.callbacks import callback_handler
-from src.bot.handlers.commands import admin_command, start_command
+from src.bot.handlers.commands import admin_command, reset_command, start_command
 from src.bot.handlers.messages import photo_handler, text_handler
 from src.bot.state import start_state_cleaner
 from src.database.apikeys import api_key_manager
@@ -66,6 +66,7 @@ async def post_init(application: Application) -> None:
     await application.bot.set_my_commands([
         ("start", "Menu Utama"),
         ("admin", "Panel Admin"),
+        ("reset", "Reset Proses"),
     ])
 
     # Start background state cleaner
@@ -113,6 +114,7 @@ def main() -> None:
     # Register handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("admin", admin_command))
+    application.add_handler(CommandHandler("reset", reset_command))
     application.add_handler(CallbackQueryHandler(callback_handler))
     application.add_handler(MessageHandler(filters.PHOTO, photo_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))

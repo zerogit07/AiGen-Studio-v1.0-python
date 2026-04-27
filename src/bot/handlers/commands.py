@@ -150,3 +150,15 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
     else:
         await update.message.reply_text("\u274c Akses ditolak.")
+
+
+async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if not user:
+        return
+    user_id = user.id
+    await member_manager.reset_process(user_id)
+    await update.message.reply_text(
+        "\U0001f504 *Proses berhasil dibersihkan.* Sekarang Anda bisa melakukan generate ulang.",
+        parse_mode="Markdown",
+    )
