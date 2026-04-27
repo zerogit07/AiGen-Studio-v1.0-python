@@ -53,7 +53,10 @@ async def handle_start_command(
             ],
         ]
         if not member_data:
-            rows.append([InlineKeyboardButton("\U0001f381 Free Trial", callback_data="free_trial")])
+            rows.append([
+                InlineKeyboardButton("\U0001f381 Free Trial", callback_data="free_trial"),
+                InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="back_main"),
+            ])
         else:
             rows.append([InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="back_main")])
 

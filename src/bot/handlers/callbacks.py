@@ -632,8 +632,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 InlineKeyboardButton("\u2b50 Pro", callback_data="pro"),
                 InlineKeyboardButton("\U0001f48e Ultra", callback_data="ultra"),
             ],
-            [InlineKeyboardButton("\U0001f381 Free Trial", callback_data="free_trial")],
-            [InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="back_main")],
+            [
+                InlineKeyboardButton("\U0001f381 Free Trial", callback_data="free_trial"),
+                InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="back_main"),
+            ],
         ])
         try:
             await query.message.delete()
