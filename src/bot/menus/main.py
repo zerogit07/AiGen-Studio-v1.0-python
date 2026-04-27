@@ -22,77 +22,77 @@ def get_main_keyboard(active_models: list[dict]) -> InlineKeyboardMarkup:
 def get_resolution_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("720p", callback_data="resolution:720"),
-            InlineKeyboardButton("1080p", callback_data="resolution:1080"),
+            InlineKeyboardButton("\U0001f4fa 720p", callback_data="resolution:720"),
+            InlineKeyboardButton("\U0001f4fa 1080p", callback_data="resolution:1080"),
         ],
-        [InlineKeyboardButton("Kembali", callback_data="back_main")],
+        [InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="back_main")],
     ])
 
 
 def get_orientation_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Video (Max 30s)", callback_data="orientation:video"),
-            InlineKeyboardButton("Image (Max 10s)", callback_data="orientation:image"),
+            InlineKeyboardButton("\U0001f3ac Video (Max 30s)", callback_data="orientation:video"),
+            InlineKeyboardButton("\U0001f5bc Image (Max 10s)", callback_data="orientation:image"),
         ],
-        [InlineKeyboardButton("Kembali", callback_data="back_main")],
+        [InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="back_main")],
     ])
 
 
 def get_o1_mode_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Mode Interpolasi", callback_data="o1_mode:interpolation"),
-            InlineKeyboardButton("Mode Reference", callback_data="o1_mode:reference"),
+            InlineKeyboardButton("\U0001f504 Mode Interpolasi", callback_data="o1_mode:interpolation"),
+            InlineKeyboardButton("\U0001f465 Mode Reference", callback_data="o1_mode:reference"),
         ],
-        [InlineKeyboardButton("Kembali", callback_data="back_main")],
+        [InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="back_main")],
     ])
 
 
 def get_audio_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Audio On", callback_data="audio:on"),
-            InlineKeyboardButton("Audio Off", callback_data="audio:off"),
+            InlineKeyboardButton("\U0001f50a Audio On", callback_data="audio:on"),
+            InlineKeyboardButton("\U0001f507 Audio Off", callback_data="audio:off"),
         ],
-        [InlineKeyboardButton("Kembali", callback_data="back_main")],
+        [InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="back_main")],
     ])
 
 
 def get_use_image_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Ya (Gunakan Gambar)", callback_data="use_image:yes"),
-            InlineKeyboardButton("Tidak (Teks Saja)", callback_data="use_image:no"),
+            InlineKeyboardButton("\U0001f5bc Ya (Gunakan Gambar)", callback_data="use_image:yes"),
+            InlineKeyboardButton("\U0001f4dd Tidak (Teks Saja)", callback_data="use_image:no"),
         ],
-        [InlineKeyboardButton("Kembali", callback_data="back_main")],
+        [InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="back_main")],
     ])
 
 
 def get_kling3_mode_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Tanpa Multi-shot", callback_data="kling3_mode:single"),
-            InlineKeyboardButton("Multi-shot Auto", callback_data="kling3_mode:multi_intelligence"),
+            InlineKeyboardButton("\u274c Tanpa Multi-shot", callback_data="kling3_mode:single"),
+            InlineKeyboardButton("\U0001f916 Multi-shot Auto", callback_data="kling3_mode:multi_intelligence"),
         ],
-        [InlineKeyboardButton("Multi-shot Custom", callback_data="kling3_mode:multi_customize")],
-        [InlineKeyboardButton("Kembali", callback_data="back_main")],
+        [InlineKeyboardButton("\U0001f6e0 Multi-shot Custom", callback_data="kling3_mode:multi_customize")],
+        [InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="back_main")],
     ])
 
 
 def get_veo_mode_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("T2V (Text to Video)", callback_data="veo_mode:t2v")],
-        [InlineKeyboardButton("Kembali", callback_data="back_main")],
+        [InlineKeyboardButton("\U0001f4dd T2V (Text to Video)", callback_data="veo_mode:t2v")],
+        [InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="back_main")],
     ])
 
 
 def get_aspect_ratio_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("16:9 (Widescreen)", callback_data="ratio:widescreen_16_9"),
-            InlineKeyboardButton("9:16 (Portrait)", callback_data="ratio:portrait_9_16"),
+            InlineKeyboardButton("\U0001f4fa 16:9 (Widescreen)", callback_data="ratio:widescreen_16_9"),
+            InlineKeyboardButton("\U0001f4f1 9:16 (Portrait)", callback_data="ratio:portrait_9_16"),
         ],
-        [InlineKeyboardButton("1:1 (Square)", callback_data="ratio:square_1_1")],
-        [InlineKeyboardButton("Kembali", callback_data="back_main")],
+        [InlineKeyboardButton("\u2b1b\ufe0f 1:1 (Square)", callback_data="ratio:square_1_1")],
+        [InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="back_main")],
     ])

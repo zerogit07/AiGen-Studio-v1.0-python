@@ -80,22 +80,22 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data == "kv3_edit_prompt":
         kv3.awaiting_input = "single_prompt"
-        await context.bot.send_message(chat_id=chat_id, text="Kirimkan prompt teks Anda:")
+        await context.bot.send_message(chat_id=chat_id, text="📝 Kirimkan prompt teks Anda:")
         return
 
     if data == "kv3_upload_first_frame":
         kv3.awaiting_input = "first_frame"
-        await context.bot.send_message(chat_id=chat_id, text="Kirimkan gambar untuk First Frame:")
+        await context.bot.send_message(chat_id=chat_id, text="🖼 Kirimkan gambar untuk First Frame:")
         return
 
     if data == "kv3_upload_end_frame":
         kv3.awaiting_input = "end_frame"
-        await context.bot.send_message(chat_id=chat_id, text="Kirimkan gambar untuk End Frame:")
+        await context.bot.send_message(chat_id=chat_id, text="🖼 Kirimkan gambar untuk End Frame:")
         return
 
     if data == "kv3_upload_element":
         kv3.awaiting_input = "element"
-        await context.bot.send_message(chat_id=chat_id, text="Kirimkan file gambar untuk Referensi Karakter (Element). Maks 3 gambar.")
+        await context.bot.send_message(chat_id=chat_id, text="🖼 Kirimkan file gambar untuk Referensi Karakter (Element). Maks 3 gambar.")
         return
 
     if data == "kv3_change_duration":
@@ -160,7 +160,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data == "kv3_generate":
         if not kv3.prompt:
-            await context.bot.send_message(chat_id=chat_id, text="Prompt masih kosong! Silakan isi prompt terlebih dahulu.")
+            await context.bot.send_message(chat_id=chat_id, text="❌ Prompt masih kosong! Silakan isi prompt terlebih dahulu.")
             return
         # Map KV3 state to UserState and finalize
         state.model = kv3.model_type
@@ -429,7 +429,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data == "nano_continue":
         state.step = "WAIT_PROMPT"
-        await context.bot.send_message(chat_id=chat_id, text="Kirimkan prompt teks Anda untuk generate gambar:")
+        await context.bot.send_message(chat_id=chat_id, text="📝 Kirimkan prompt teks Anda untuk generate gambar:")
         return
 
     if data.startswith("veo31_mod:"):
@@ -480,7 +480,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data == "veo31_continue":
         state.step = "WAIT_PROMPT"
-        await context.bot.send_message(chat_id=chat_id, text="Kirimkan prompt teks Anda untuk generate video:")
+        await context.bot.send_message(chat_id=chat_id, text="📝 Kirimkan prompt teks Anda untuk generate video:")
         return
 
     if data.startswith("k26m_ori:"):
@@ -503,7 +503,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data == "k26m_continue":
         state.step = "WAIT_PROMPT"
-        await context.bot.send_message(chat_id=chat_id, text="Kirimkan prompt dan gambar Anda untuk generate:")
+        await context.bot.send_message(chat_id=chat_id, text="📝 Kirimkan prompt dan gambar Anda untuk generate:")
         return
 
     # Kling 2.1 config
@@ -536,7 +536,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data == "k21_continue":
         state.step = "WAIT_PROMPT"
-        await context.bot.send_message(chat_id=chat_id, text="Kirimkan prompt teks Anda:")
+        await context.bot.send_message(chat_id=chat_id, text="📝 Kirimkan prompt teks Anda:")
         return
 
     # Kling 2.6 Pro / 2.5 Turbo config
@@ -566,7 +566,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data in ("k26p_continue", "k25t_continue"):
         state.step = "WAIT_PROMPT"
-        await context.bot.send_message(chat_id=chat_id, text="Kirimkan prompt dan gambar Anda:")
+        await context.bot.send_message(chat_id=chat_id, text="📝 Kirimkan prompt dan gambar Anda:")
         return
 
     # ─── Subscription / Payment ──────────────────────────
@@ -614,13 +614,13 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data == "free_trial":
         await member_manager.add_member(user_id, "testing", days=30, testing_quota=3)
-        await context.bot.send_message(chat_id=chat_id, text="*FREE TRIAL AKTIF!*\n\nAnda mendapat 3 kuota percobaan gratis.", parse_mode="Markdown")
+        await context.bot.send_message(chat_id=chat_id, text="🎁 *FREE TRIAL AKTIF!*\n\nAnda mendapat 3 kuota percobaan gratis.", parse_mode="Markdown")
         await handle_start_command(update, context, is_edit=False)
         return
 
     if data == "confirm_payment":
         state.waiting_payment_proof = True
-        await context.bot.send_message(chat_id=chat_id, text="Silakan kirim screenshot/bukti transfer Anda:")
+        await context.bot.send_message(chat_id=chat_id, text="📸 Silakan kirim screenshot/bukti transfer Anda:")
         return
 
     if data == "show_plans":
@@ -635,9 +635,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if data == "admin_panel" or data == "admin_panel_back":
         if is_user_admin(user_id, state):
             try:
-                await query.edit_message_text(text="*Admin Panel*", parse_mode="Markdown", reply_markup=get_admin_keyboard())
+                await query.edit_message_text(text="🛠 *Admin Panel*", parse_mode="Markdown", reply_markup=get_admin_keyboard())
             except Exception:
-                await context.bot.send_message(chat_id=chat_id, text="*Admin Panel*", parse_mode="Markdown", reply_markup=get_admin_keyboard())
+                await context.bot.send_message(chat_id=chat_id, text="🛠 *Admin Panel*", parse_mode="Markdown", reply_markup=get_admin_keyboard())
         return
 
     if data == "admin_logout":
@@ -664,32 +664,32 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data == "add_key_btn":
         state.awaiting_api_key = True
-        await context.bot.send_message(chat_id=chat_id, text="Kirimkan API Key Freepik (satu per baris):")
+        await context.bot.send_message(chat_id=chat_id, text="🔑 Kirimkan API Key Freepik (satu per baris):")
         return
 
     if data == "test_keys_btn":
-        await context.bot.send_message(chat_id=chat_id, text="Sedang menguji semua key...")
+        await context.bot.send_message(chat_id=chat_id, text="⏳ Sedang menguji semua key...")
         result = await api_key_manager.test_all_keys()
         await context.bot.send_message(
             chat_id=chat_id,
-            text=f"*Hasil Test Key:*\n- Valid: {result['valid']}\n- Limit: {result['limit']}\n- Invalid: {result['invalid']}\n- Total: {result['total']}",
+            text=f"🔑 *Hasil Test Key:*\n- Valid: 🟢 {result['valid']}\n- Limit: 🟡 {result['limit']}\n- Invalid: 🔴 {result['invalid']}\n- Total: {result['total']}",
             parse_mode="Markdown",
         )
         return
 
     if data == "enable_all_keys":
         await api_key_manager.enable_all()
-        await context.bot.send_message(chat_id=chat_id, text="Semua key diaktifkan!")
+        await context.bot.send_message(chat_id=chat_id, text="🟢 Semua key diaktifkan!")
         return
 
     if data == "manage_keys":
-        await context.bot.send_message(chat_id=chat_id, text="*Manajemen Key*", parse_mode="Markdown", reply_markup=get_manage_keys_keyboard())
+        await context.bot.send_message(chat_id=chat_id, text="🔑 *Manajemen Key*", parse_mode="Markdown", reply_markup=get_manage_keys_keyboard())
         return
 
     if data == "list_keys_btn":
         keys = api_key_manager.get_all_keys()
         if not keys:
-            await context.bot.send_message(chat_id=chat_id, text="Tidak ada API key tersimpan.")
+            await context.bot.send_message(chat_id=chat_id, text="❌ Tidak ada API key tersimpan.")
             return
         now = int(time.time() * 1000)
         lines = ["*Daftar API Key:*\n"]
@@ -712,36 +712,36 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data == "add_proxy_btn":
         state.waiting_proxy = True
-        await context.bot.send_message(chat_id=chat_id, text="Kirimkan proxy (satu per baris, format: http://user:pass@host:port):")
+        await context.bot.send_message(chat_id=chat_id, text="🌐 Kirimkan proxy (satu per baris, format: http://user:pass@host:port):")
         return
 
     if data == "check_proxy_btn":
-        await context.bot.send_message(chat_id=chat_id, text="Sedang mengecek semua proxy...")
+        await context.bot.send_message(chat_id=chat_id, text="⏳ Sedang mengecek semua proxy...")
         result = await proxy_manager.check_all_proxies()
         await context.bot.send_message(
             chat_id=chat_id,
-            text=f"*Hasil Cek Proxy:*\n- Aktif: {result['active_count']}\n- Mati: {result['dead_count']}\n- Total: {result['total']}",
+            text=f"🌐 *Hasil Cek Proxy:*\n- Aktif: 🟢 {result['active_count']}\n- Mati: 🔴 {result['dead_count']}\n- Total: {result['total']}",
             parse_mode="Markdown",
         )
         return
 
     if data == "manage_proxies":
-        await context.bot.send_message(chat_id=chat_id, text="*Manajemen Proxy*", parse_mode="Markdown", reply_markup=get_manage_proxies_keyboard())
+        await context.bot.send_message(chat_id=chat_id, text="🌐 *Manajemen Proxy*", parse_mode="Markdown", reply_markup=get_manage_proxies_keyboard())
         return
 
     if data == "enable_all_proxies":
         await proxy_manager.enable_all()
-        await context.bot.send_message(chat_id=chat_id, text="Semua proxy diaktifkan!")
+        await context.bot.send_message(chat_id=chat_id, text="🟢 Semua proxy diaktifkan!")
         return
 
     if data == "disable_all_proxies":
         await proxy_manager.disable_all()
-        await context.bot.send_message(chat_id=chat_id, text="Semua proxy dinonaktifkan!")
+        await context.bot.send_message(chat_id=chat_id, text="🔴 Semua proxy dinonaktifkan!")
         return
 
     if data == "delete_all_proxies":
         await proxy_manager.delete_all()
-        await context.bot.send_message(chat_id=chat_id, text="Semua proxy dihapus!")
+        await context.bot.send_message(chat_id=chat_id, text="🗑 Semua proxy dihapus!")
         return
 
     # Model Management
@@ -767,8 +767,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data == "toggle_maintenance":
         new_state = await model_manager.toggle_maintenance()
-        status = "ON" if new_state else "OFF"
-        await context.bot.send_message(chat_id=chat_id, text=f"*Maintenance Mode:* {status}", parse_mode="Markdown")
+        status = "🟢 ON" if new_state else "🔴 OFF"
+        await context.bot.send_message(chat_id=chat_id, text=f"🚧 *Maintenance Mode:* {status}", parse_mode="Markdown")
         return
 
     # Member Management
@@ -789,7 +789,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         state.waiting_add_member = True
         await context.bot.send_message(
             chat_id=chat_id,
-            text="Kirimkan dalam format:\n`USER_ID PLAN HARI`\n\nContoh: `123456789 pro 30`",
+            text="👥 Kirimkan dalam format:\n`USER_ID PLAN HARI`\n\nContoh: `123456789 pro 30`",
             parse_mode="Markdown",
         )
         return
@@ -799,9 +799,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if not is_user_admin(user_id, state):
             return
         try:
-            await query.edit_message_text(text="*Statistik*", parse_mode="Markdown", reply_markup=get_stats_menu_keyboard())
+            await query.edit_message_text(text="📊 *Statistik*", parse_mode="Markdown", reply_markup=get_stats_menu_keyboard())
         except Exception:
-            await context.bot.send_message(chat_id=chat_id, text="*Statistik*", parse_mode="Markdown", reply_markup=get_stats_menu_keyboard())
+            await context.bot.send_message(chat_id=chat_id, text="📊 *Statistik*", parse_mode="Markdown", reply_markup=get_stats_menu_keyboard())
         return
 
     if data == "admin_stats_full":
@@ -816,7 +816,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data == "admin_stats_logs":
         if not global_logs:
-            await context.bot.send_message(chat_id=chat_id, text="Belum ada log aktivitas.")
+            await context.bot.send_message(chat_id=chat_id, text="📋 Belum ada log aktivitas.")
             return
         lines = ["*Log Aktivitas Terbaru:*\n"]
         for log in global_logs[:20]:
@@ -826,7 +826,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data == "admin_stats_check_user":
         state.waiting_check_user = True
-        await context.bot.send_message(chat_id=chat_id, text="Kirimkan User ID yang ingin dicek:")
+        await context.bot.send_message(chat_id=chat_id, text="🔍 Kirimkan User ID yang ingin dicek:")
         return
 
     # Landing Page
@@ -834,37 +834,37 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if not is_user_admin(user_id, state):
             return
         try:
-            await query.edit_message_text(text="*Landing Page*", parse_mode="Markdown", reply_markup=get_landing_page_keyboard())
+            await query.edit_message_text(text="🖼 *Landing Page*", parse_mode="Markdown", reply_markup=get_landing_page_keyboard())
         except Exception:
-            await context.bot.send_message(chat_id=chat_id, text="*Landing Page*", parse_mode="Markdown", reply_markup=get_landing_page_keyboard())
+            await context.bot.send_message(chat_id=chat_id, text="🖼 *Landing Page*", parse_mode="Markdown", reply_markup=get_landing_page_keyboard())
         return
 
     if data == "admin_lp_home":
         try:
-            await query.edit_message_text(text="*Halaman Awal*", parse_mode="Markdown", reply_markup=get_home_page_keyboard())
+            await query.edit_message_text(text="🏠 *Halaman Awal*", parse_mode="Markdown", reply_markup=get_home_page_keyboard())
         except Exception:
-            await context.bot.send_message(chat_id=chat_id, text="*Halaman Awal*", parse_mode="Markdown", reply_markup=get_home_page_keyboard())
+            await context.bot.send_message(chat_id=chat_id, text="🏠 *Halaman Awal*", parse_mode="Markdown", reply_markup=get_home_page_keyboard())
         return
 
     if data == "admin_lp_payment":
         try:
-            await query.edit_message_text(text="*Halaman Payment*", parse_mode="Markdown", reply_markup=get_payment_page_keyboard())
+            await query.edit_message_text(text="💳 *Halaman Payment*", parse_mode="Markdown", reply_markup=get_payment_page_keyboard())
         except Exception:
-            await context.bot.send_message(chat_id=chat_id, text="*Halaman Payment*", parse_mode="Markdown", reply_markup=get_payment_page_keyboard())
+            await context.bot.send_message(chat_id=chat_id, text="💳 *Halaman Payment*", parse_mode="Markdown", reply_markup=get_payment_page_keyboard())
         return
 
     if data == "admin_lp_prices":
         try:
-            await query.edit_message_text(text="*Manajemen Harga*", parse_mode="Markdown", reply_markup=get_price_page_keyboard())
+            await query.edit_message_text(text="💰 *Manajemen Harga*", parse_mode="Markdown", reply_markup=get_price_page_keyboard())
         except Exception:
-            await context.bot.send_message(chat_id=chat_id, text="*Manajemen Harga*", parse_mode="Markdown", reply_markup=get_price_page_keyboard())
+            await context.bot.send_message(chat_id=chat_id, text="💰 *Manajemen Harga*", parse_mode="Markdown", reply_markup=get_price_page_keyboard())
         return
 
     if data == "admin_lp_limits":
         try:
-            await query.edit_message_text(text="*Manajemen Limit*", parse_mode="Markdown", reply_markup=get_limit_page_keyboard())
+            await query.edit_message_text(text="⚙️ *Manajemen Limit*", parse_mode="Markdown", reply_markup=get_limit_page_keyboard())
         except Exception:
-            await context.bot.send_message(chat_id=chat_id, text="*Manajemen Limit*", parse_mode="Markdown", reply_markup=get_limit_page_keyboard())
+            await context.bot.send_message(chat_id=chat_id, text="⚙️ *Manajemen Limit*", parse_mode="Markdown", reply_markup=get_limit_page_keyboard())
         return
 
     # Edit LP settings
@@ -894,9 +894,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if not is_user_admin(user_id, state):
             return
         try:
-            await query.edit_message_text(text="*Manajemen Pesan*", parse_mode="Markdown", reply_markup=get_message_management_keyboard())
+            await query.edit_message_text(text="📩 *Manajemen Pesan*", parse_mode="Markdown", reply_markup=get_message_management_keyboard())
         except Exception:
-            await context.bot.send_message(chat_id=chat_id, text="*Manajemen Pesan*", parse_mode="Markdown", reply_markup=get_message_management_keyboard())
+            await context.bot.send_message(chat_id=chat_id, text="📩 *Manajemen Pesan*", parse_mode="Markdown", reply_markup=get_message_management_keyboard())
         return
 
     if data in ("admin_broadcast_all", "admin_broadcast_member", "admin_broadcast_trial"):
@@ -908,13 +908,13 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data == "admin_chat_personal":
         state.waiting_chat_id = True
-        await context.bot.send_message(chat_id=chat_id, text="Kirimkan User ID yang ingin Anda ajak chat:")
+        await context.bot.send_message(chat_id=chat_id, text="💬 Kirimkan User ID yang ingin Anda ajak chat:")
         return
 
     if data == "close_chat":
         state.chatting_with = None
         state.step = None
-        await context.bot.send_message(chat_id=chat_id, text="Chat ditutup.")
+        await context.bot.send_message(chat_id=chat_id, text="🚪 Chat ditutup.")
         return
 
     # Backup Management
@@ -922,9 +922,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if not is_user_admin(user_id, state):
             return
         try:
-            await query.edit_message_text(text="*Manajemen Backup*", parse_mode="Markdown", reply_markup=get_backup_management_keyboard())
+            await query.edit_message_text(text="💾 *Manajemen Backup*", parse_mode="Markdown", reply_markup=get_backup_management_keyboard())
         except Exception:
-            await context.bot.send_message(chat_id=chat_id, text="*Manajemen Backup*", parse_mode="Markdown", reply_markup=get_backup_management_keyboard())
+            await context.bot.send_message(chat_id=chat_id, text="💾 *Manajemen Backup*", parse_mode="Markdown", reply_markup=get_backup_management_keyboard())
         return
 
     if data == "admin_backup":

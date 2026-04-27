@@ -47,11 +47,11 @@ async def handle_start_command(
 
         keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("Lite", callback_data="lite"),
-                InlineKeyboardButton("Pro", callback_data="pro"),
-                InlineKeyboardButton("Ultra", callback_data="ultra"),
+                InlineKeyboardButton("\U0001f331 Lite", callback_data="lite"),
+                InlineKeyboardButton("\u2b50 Pro", callback_data="pro"),
+                InlineKeyboardButton("\U0001f48e Ultra", callback_data="ultra"),
             ],
-            [InlineKeyboardButton("Free Trial", callback_data="free_trial")],
+            [InlineKeyboardButton("\U0001f381 Free Trial", callback_data="free_trial")],
         ])
 
         if is_edit:
@@ -76,11 +76,11 @@ async def handle_start_command(
     daily_limit = member_manager.get_daily_limit(member_data.plan, user_id)
 
     plan_names = {
-        "lite": "AiGen Lite",
-        "pro": "AiGen Pro",
-        "ultra": "AiGen Ultra",
+        "lite": "\U0001f331 AiGen Lite",
+        "pro": "\u2b50 AiGen Pro",
+        "ultra": "\U0001f48e AiGen Ultra",
     }
-    plan_name = plan_names.get(member_data.plan, "Free Trial")
+    plan_name = plan_names.get(member_data.plan, "\U0001f381 Free Trial")
 
     expire_string = "Expired"
     if member_data.expire_date:
@@ -92,18 +92,18 @@ async def handle_start_command(
             pass
 
     message = (
-        f"*Id:* `{user_id}`\n"
-        f"*Paket:* {plan_name}\n"
-        f"*Aktive:* (s/d {expire_string})\n"
-        f"*Status:* {active_processes}/{max_process} process\n"
-        f"*Kuota:* {usage.video_today}/{daily_limit} daily"
+        f"\U0001f464 *Id:* `{user_id}`\n"
+        f"\U0001f4e6 *Paket:* {plan_name}\n"
+        f"\U0001f5d3\ufe0f *Aktive:* (s/d {expire_string})\n"
+        f"\U0001f916 *Status:* {active_processes}/{max_process} process\n"
+        f"\U0001f4ca *Kuota:* {usage.video_today}/{daily_limit} daily"
     )
 
     keyboard = get_main_keyboard(model_manager.get_active_models())
     rows = list(keyboard.inline_keyboard)
 
     if member_data.plan == "testing":
-        rows.append([InlineKeyboardButton("Daftar Paket Lite / Pro / Ultra", callback_data="show_plans")])
+        rows.append([InlineKeyboardButton("\U0001f48e Daftar Paket Lite / Pro / Ultra", callback_data="show_plans")])
 
     reply_markup = InlineKeyboardMarkup(rows)
 
@@ -144,21 +144,9 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if is_user_admin(user_id, state):
         state.is_admin = True
         await update.message.reply_text(
-            "*Admin Panel*",
+            "\U0001f6e0 *Admin Panel*",
             parse_mode="Markdown",
             reply_markup=get_admin_keyboard(),
         )
     else:
-        await update.message.reply_text("Akses ditolak.")
-
-
-async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    if not user:
-        return
-
-    await member_manager.reset_process(user.id)
-    await update.message.reply_text(
-        "*Proses berhasil dibersihkan.* Sekarang Anda bisa melakukan generate ulang.",
-        parse_mode="Markdown",
-    )
+        await update.message.reply_text("\u274c Akses ditolak.")
