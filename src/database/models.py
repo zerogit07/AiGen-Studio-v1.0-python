@@ -27,13 +27,12 @@ class ModelManager:
             try:
                 resp = (
                     supabase.table("settings")
-                    .select("data")
+                    .select("id, data")
                     .eq("id", "maintenance")
-                    .single()
                     .execute()
                 )
-                if resp.data:
-                    self._maintenance_mode = resp.data.get("data", {}).get("active", False)
+                if resp.data and len(resp.data) > 0:
+                    self._maintenance_mode = resp.data[0].get("data", {}).get("active", False)
             except Exception:
                 pass
 

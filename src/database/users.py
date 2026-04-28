@@ -16,10 +16,10 @@ class UserManager:
         if not supabase:
             return
         try:
-            resp = supabase.table("users").select("user_id").execute()
+            resp = supabase.table("users").select("id").execute()
             for row in resp.data or []:
-                if row.get("user_id"):
-                    self._users.add(str(row["user_id"]))
+                if row.get("id"):
+                    self._users.add(str(row["id"]))
             logger.info("Loaded %d users from Supabase.", len(self._users))
         except Exception as exc:
             logger.error("Error loading users from Supabase: %s", exc)
@@ -39,12 +39,13 @@ class UserManager:
                 try:
                     supabase.table("users").upsert(
                         {
-                            "user_id": id_str,
-                            "username": username,
-                            "full_name": full_name,
+                            "id": int(id_str),
+                            "username": username or "",
+                            "first_name": first_name or "",
+                            "last_name": last_name or "",
                             "joined_at": datetime.now(timezone.utc).isoformat(),
                         },
-                        on_conflict="user_id",
+                        on_conflict="id",
                     ).execute()
                     logger.info("Saved new user %s to Supabase", id_str)
                 except Exception as exc:
@@ -57,7 +58,7 @@ class UserManager:
             resp = (
                 supabase.table("users")
                 .select("*")
-                .eq("user_id", str(user_id))
+                .eq("id", int(str(user_id)))
                 .single()
                 .execute()
             )
