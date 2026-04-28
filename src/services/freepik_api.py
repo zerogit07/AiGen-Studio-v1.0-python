@@ -120,6 +120,10 @@ async def _handle_veo31(params: GenerateParams, config: ModelConfig, endpoint: s
     }
     if config.needs_duration:
         payload["duration"] = int_duration
+    if params.image_base64:
+        payload["image"] = params.image_base64
+    elif params.image_url:
+        payload["image"] = params.image_url
     return await _send_request(endpoint, status_path, payload)
 
 
@@ -212,19 +216,45 @@ async def _handle_kling_v3(params: GenerateParams, config: ModelConfig, endpoint
     return await _send_request(endpoint, status_path, payload)
 
 
-async def _handle_kling_2_6_pro(params: GenerateParams, config: ModelConfig, endpoint: str, status_path: str) -> dict:
-    ratio_map = {
-        "16:9": "widescreen_16_9",
-        "9:16": "social_story_9_16",
-        "1:1": "square_1_1",
-    }
-    raw_ratio = _normalize_ratio(params.aspect_ratio)
-    aspect = ratio_map.get(raw_ratio, params.aspect_ratio)
+async def _handle_kling_v3_omni(params: GenerateParams, config: ModelConfig, endpoint: str, status_path: str) -> dict:
     payload: dict = {"prompt": params.prompt}
     int_duration = int(params.duration or "5")
     if config.needs_duration:
         payload["duration"] = str(int_duration)
-    payload["aspect_ratio"] = aspect
+    if params.image_base64:
+        payload["start_image_url"] = params.image_base64
+    elif params.image_url:
+        payload["start_image_url"] = params.image_url
+    if params.image_url_last:
+        payload["end_image_url"] = params.image_url_last
+    if params.image_refs:
+        payload["elements"] = [
+            {"reference_image_urls": params.image_refs[:3]}
+        ]
+    if params.generate_audio:
+        payload["generate_audio"] = True
+    if params.shots and params.kling3_mode in ("multi_intelligence", "multi_customize"):
+        payload["multi_prompt"] = [
+            s.get("prompt", "") for s in params.shots
+        ]
+        if params.kling3_mode == "multi_intelligence":
+            payload["shot_type"] = "intelligent"
+        else:
+            payload["shot_type"] = "customize"
+    return await _send_request(endpoint, status_path, payload)
+
+
+async def _handle_kling_2_6_pro(params: GenerateParams, config: ModelConfig, endpoint: str, status_path: str) -> dict:
+    payload: dict = {}
+    int_duration = int(params.duration or "5")
+    if config.needs_duration:
+        payload["duration"] = str(int_duration)
+    if params.image_base64:
+        payload["image"] = params.image_base64
+    elif params.image_url:
+        payload["image"] = params.image_url
+    if params.prompt:
+        payload["prompt"] = params.prompt
     if params.generate_audio:
         payload["generate_audio"] = True
     return await _send_request(endpoint, status_path, payload)
@@ -253,9 +283,9 @@ MODEL_HANDLERS = {
     "kling_v3": _handle_kling_v3,
     "kling_v3_pro": _handle_kling_v3,
     "kling_v3_std": _handle_kling_v3,
-    "kling_v3_omni": _handle_kling_v3,
-    "kling_v3_omni_pro": _handle_kling_v3,
-    "kling_v3_omni_std": _handle_kling_v3,
+    "kling_v3_omni": _handle_kling_v3_omni,
+    "kling_v3_omni_pro": _handle_kling_v3_omni,
+    "kling_v3_omni_std": _handle_kling_v3_omni,
     "kling_v3_motion": _handle_motion,
     "kling_v3_motion_pro": _handle_motion,
     "kling_v3_motion_std": _handle_motion,

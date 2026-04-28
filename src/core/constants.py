@@ -33,7 +33,8 @@ MODEL_CONFIG: dict[str, ModelConfig] = {
     "kling_v3_omni": ModelConfig(
         endpoint="video/kling-v3-omni-pro",
         status_path="video/kling-v3-omni",
-        needs_duration=False,
+        needs_duration=True,
+        durations=["3", "5", "7", "10", "12", "15"],
         resolution="1080",
     ),
     "kling_v3_pro": ModelConfig(
@@ -67,13 +68,15 @@ MODEL_CONFIG: dict[str, ModelConfig] = {
     "kling_v3_omni_pro": ModelConfig(
         endpoint="video/kling-v3-omni-pro",
         status_path="video/kling-v3-omni",
-        needs_duration=False,
+        needs_duration=True,
+        durations=["3", "5", "7", "10", "12", "15"],
         resolution="1080",
     ),
     "kling_v3_omni_std": ModelConfig(
         endpoint="video/kling-v3-omni-std",
         status_path="video/kling-v3-omni",
-        needs_duration=False,
+        needs_duration=True,
+        durations=["3", "5", "7", "10", "12", "15"],
         resolution="720",
     ),
     "kling_2_6_pro": ModelConfig(
@@ -85,21 +88,21 @@ MODEL_CONFIG: dict[str, ModelConfig] = {
     ),
     "kling_2_6_motion": ModelConfig(
         endpoint="video/kling-v2-6-motion-control-pro",
-        status_path="video/kling-v2-6-motion-control-pro",
+        status_path="image-to-video/kling-v2-6",
         needs_duration=False,
         needs_orientation=True,
         resolution="1080",
     ),
     "kling_2_6_motion_pro": ModelConfig(
         endpoint="video/kling-v2-6-motion-control-pro",
-        status_path="video/kling-v2-6-motion-control-pro",
+        status_path="image-to-video/kling-v2-6",
         needs_duration=False,
         needs_orientation=True,
         resolution="1080",
     ),
     "kling_2_6_motion_std": ModelConfig(
         endpoint="video/kling-v2-6-motion-control-std",
-        status_path="video/kling-v2-6-motion-control-std",
+        status_path="image-to-video/kling-v2-6",
         needs_duration=False,
         needs_orientation=True,
         resolution="720",
@@ -115,7 +118,6 @@ MODEL_CONFIG: dict[str, ModelConfig] = {
         endpoint="image-to-video/kling-v2-1-pro",
         status_path="image-to-video/kling-v2-1-pro",
         needs_duration=True,
-        needs_aspect_ratio=True,
         durations=["5", "10"],
         resolution="1080",
     ),
