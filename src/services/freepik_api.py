@@ -124,8 +124,7 @@ async def submit_video_generation(params: GenerateParams) -> dict:
     if not module:
         raise RuntimeError(f"Model handler not found for: {model_id}")
 
-    endpoint_label = getattr(module, "ENDPOINT", None) or getattr(module, "ENDPOINT_TEXT", "unknown")
-    logger.info("[%s] Submitting to %s", model_id, endpoint_label)
+    logger.info("[%s] Submitting via %s", model_id, module.__name__)
     return await module.create_task(params, _send_request)
 
 
