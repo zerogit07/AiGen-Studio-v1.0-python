@@ -19,6 +19,16 @@ class ProxyEntry:
 
 
 @dataclass
+class TripleSet:
+    api_key: str
+    proxy: str
+    fingerprint: dict
+    in_use: bool = False
+    last_used: float = 0.0
+    burned: bool = False
+
+
+@dataclass
 class MemberData:
     plan: str  # "lite" | "pro" | "ultra" | "testing"
     start_date: Optional[str] = None

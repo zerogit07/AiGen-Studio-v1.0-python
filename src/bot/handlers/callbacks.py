@@ -48,7 +48,7 @@ from src.database.proxies import proxy_manager
 from src.database.settings import landing_page_manager
 from src.database.usage import usage_manager
 from src.database.users import user_manager
-from src.services.jobs import finalize_job
+from src.core.queue import add_job
 from src.services.polling import mark_buttons_used
 from src.services.stats import global_logs, global_stats
 
@@ -184,13 +184,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         else:
             state.kling3_mode = "single"
 
-        await finalize_job(
-            bot=context.bot,
-            chat_id=chat_id,
+        job_id = await add_job(
             user_id=user_id,
-            state=state,
+            chat_id=chat_id,
             prompt=kv3.prompt,
             model_id=kv3.model_type,
+            state=state,
+        )
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"Permintaanmu masuk antrian. ID job: #{job_id}",
         )
         return
 

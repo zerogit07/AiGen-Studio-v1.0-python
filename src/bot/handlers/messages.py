@@ -26,7 +26,7 @@ from src.database.models import model_manager
 from src.database.proxies import proxy_manager
 from src.database.settings import landing_page_manager
 from src.database.users import user_manager
-from src.services.jobs import finalize_job
+from src.core.queue import add_job
 
 logger = logging.getLogger(__name__)
 
@@ -312,16 +312,14 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if state.step == "WAIT_PROMPT" and state.model:
         state.temp_prompt = text
         state.step = None
-        status_msg = await update.message.reply_text("*Menyiapkan request AI...*", parse_mode="Markdown")
-        await finalize_job(
-            bot=context.bot,
-            chat_id=chat_id,
+        job_id = await add_job(
             user_id=user_id,
-            state=state,
+            chat_id=chat_id,
             prompt=text,
             model_id=state.model,
-            status_msg_id=status_msg.message_id,
+            state=state,
         )
+        await update.message.reply_text(f"Permintaanmu masuk antrian. ID job: #{job_id}")
         return
 
 
@@ -398,16 +396,14 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if caption:
             state.temp_prompt = caption
             state.step = None
-            status_msg = await update.message.reply_text("*Menyiapkan request AI...*", parse_mode="Markdown")
-            await finalize_job(
-                bot=context.bot,
-                chat_id=chat_id,
+            job_id = await add_job(
                 user_id=user_id,
-                state=state,
+                chat_id=chat_id,
                 prompt=caption,
                 model_id=state.model,
-                status_msg_id=status_msg.message_id,
+                state=state,
             )
+            await update.message.reply_text(f"Permintaanmu masuk antrian. ID job: #{job_id}")
         else:
             await update.message.reply_text("🖼 Gambar diterima! Sekarang kirimkan prompt teks Anda:")
         return
