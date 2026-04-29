@@ -17,7 +17,7 @@ def get_nano_banana_config_keyboard(state: UserState) -> tuple[str, InlineKeyboa
     ratio_label = "16:9" if ratio == "widescreen_16_9" else "9:16"
 
     message = (
-        f"*KONFIGURASI NANO BANANA*\n\n"
+        f"🍌 *KONFIGURASI NANO BANANA*\n\n"
         f"Model    : *{model_label}*\n"
         f"Resolusi : *{res.upper()}*\n"
         f"Ratio    : *{ratio_label}*\n\n"
@@ -38,8 +38,8 @@ def get_nano_banana_config_keyboard(state: UserState) -> tuple[str, InlineKeyboa
             InlineKeyboardButton(_sel("16:9", ratio == "widescreen_16_9"), callback_data="nano_rat:widescreen_16_9"),
             InlineKeyboardButton(_sel("9:16", ratio == "portrait_9_16"), callback_data="nano_rat:portrait_9_16"),
         ],
-        [InlineKeyboardButton("LANJUTKAN", callback_data="nano_continue")],
-        [InlineKeyboardButton("Kembali ke Menu Utama", callback_data="back_main")],
+        [InlineKeyboardButton("▶️ LANJUTKAN", callback_data="nano_continue")],
+        [InlineKeyboardButton("⬅️ Kembali ke Menu Utama", callback_data="back_main")],
     ])
     return message, keyboard
 
@@ -54,7 +54,7 @@ def get_veo31_config_keyboard(state: UserState) -> tuple[str, InlineKeyboardMark
     audio = "On" if state.generate_audio else "Off"
 
     message = (
-        f"*KONFIGURASI VEO 3.1*\n\n"
+        f"🎬 *KONFIGURASI VEO 3.1*\n\n"
         f"Model    : *{model_label}*\n"
         f"Resolusi : *{'4K' if res == '4k' else res + 'p'}*\n"
         f"Ratio    : *{ratio_label}*\n"
@@ -86,8 +86,8 @@ def get_veo31_config_keyboard(state: UserState) -> tuple[str, InlineKeyboardMark
             InlineKeyboardButton(_sel("Audio On", state.generate_audio), callback_data="veo31_aud:on"),
             InlineKeyboardButton(_sel("Audio Off", not state.generate_audio), callback_data="veo31_aud:off"),
         ],
-        [InlineKeyboardButton("LANJUTKAN", callback_data="veo31_continue")],
-        [InlineKeyboardButton("Kembali ke Menu Utama", callback_data="back_main")],
+        [InlineKeyboardButton("▶️ LANJUTKAN", callback_data="veo31_continue")],
+        [InlineKeyboardButton("⬅️ Kembali ke Menu Utama", callback_data="back_main")],
     ])
     return message, keyboard
 
@@ -97,7 +97,7 @@ def get_kling26_motion_config_keyboard(state: UserState) -> tuple[str, InlineKey
     res = state.resolution or "720"
 
     message = (
-        f"*KONFIGURASI KLING 2.6 MOTION*\n\n"
+        f"🎬 *KONFIGURASI KLING 2.6 MOTION*\n\n"
         f"Orientasi : *{'Video' if orientation == 'video' else 'Image'}*\n"
         f"Resolusi : *{res}p*\n\n"
         f"*Pilih parameter di bawah. Jika sudah sesuai, klik \"LANJUTKAN\".*"
@@ -112,8 +112,8 @@ def get_kling26_motion_config_keyboard(state: UserState) -> tuple[str, InlineKey
             InlineKeyboardButton(_sel("720p", res == "720"), callback_data="k26m_res:720"),
             InlineKeyboardButton(_sel("1080p", res == "1080"), callback_data="k26m_res:1080"),
         ],
-        [InlineKeyboardButton("LANJUTKAN", callback_data="k26m_continue")],
-        [InlineKeyboardButton("Kembali ke Menu Utama", callback_data="back_main")],
+        [InlineKeyboardButton("▶️ LANJUTKAN", callback_data="k26m_continue")],
+        [InlineKeyboardButton("⬅️ Kembali ke Menu Utama", callback_data="back_main")],
     ])
     return message, keyboard
 
@@ -125,7 +125,7 @@ def get_kling21_config_keyboard(state: UserState) -> tuple[str, InlineKeyboardMa
     ratio_label = "16:9" if ratio == "widescreen_16_9" else "9:16" if ratio == "portrait_9_16" else "1:1"
 
     message = (
-        f"*KONFIGURASI KLING 2.1*\n\n"
+        f"🎬 *KONFIGURASI KLING 2.1*\n\n"
         f"Resolusi : *{res}p*\n"
         f"Durasi   : *{dur}s*\n"
         f"Ratio    : *{ratio_label}*\n\n"
@@ -146,8 +146,8 @@ def get_kling21_config_keyboard(state: UserState) -> tuple[str, InlineKeyboardMa
             InlineKeyboardButton(_sel("9:16", ratio == "portrait_9_16"), callback_data="k21_rat:portrait_9_16"),
             InlineKeyboardButton(_sel("1:1", ratio == "square_1_1"), callback_data="k21_rat:square_1_1"),
         ],
-        [InlineKeyboardButton("LANJUTKAN", callback_data="k21_continue")],
-        [InlineKeyboardButton("Kembali ke Menu Utama", callback_data="back_main")],
+        [InlineKeyboardButton("▶️ LANJUTKAN", callback_data="k21_continue")],
+        [InlineKeyboardButton("⬅️ Kembali ke Menu Utama", callback_data="back_main")],
     ])
     return message, keyboard
 
@@ -157,7 +157,7 @@ def get_kling26_pro_config_keyboard(state: UserState) -> tuple[str, InlineKeyboa
     dur = state.duration or "5"
 
     message = (
-        f"*KONFIGURASI KLING 2.6 PRO*\n\n"
+        f"🎬 *KONFIGURASI KLING 2.6 PRO*\n\n"
         f"Resolusi : *{res}p*\n"
         f"Durasi   : *{dur}s*\n\n"
         f"*Pilih parameter di bawah. Jika sudah sesuai, klik \"LANJUTKAN\".*"
@@ -172,8 +172,8 @@ def get_kling26_pro_config_keyboard(state: UserState) -> tuple[str, InlineKeyboa
             InlineKeyboardButton(_sel("5s", dur == "5"), callback_data="k26p_dur:5"),
             InlineKeyboardButton(_sel("10s", dur == "10"), callback_data="k26p_dur:10"),
         ],
-        [InlineKeyboardButton("LANJUTKAN", callback_data="k26p_continue")],
-        [InlineKeyboardButton("Kembali ke Menu Utama", callback_data="back_main")],
+        [InlineKeyboardButton("▶️ LANJUTKAN", callback_data="k26p_continue")],
+        [InlineKeyboardButton("⬅️ Kembali ke Menu Utama", callback_data="back_main")],
     ])
     return message, keyboard
 
@@ -183,7 +183,7 @@ def get_kling25_turbo_config_keyboard(state: UserState) -> tuple[str, InlineKeyb
     dur = state.duration or "5"
 
     message = (
-        f"*KONFIGURASI KLING 2.5 TURBO*\n\n"
+        f"🎬 *KONFIGURASI KLING 2.5 TURBO*\n\n"
         f"Resolusi : *{res}p*\n"
         f"Durasi   : *{dur}s*\n\n"
         f"*Pilih parameter di bawah. Jika sudah sesuai, klik \"LANJUTKAN\".*"
@@ -198,8 +198,8 @@ def get_kling25_turbo_config_keyboard(state: UserState) -> tuple[str, InlineKeyb
             InlineKeyboardButton(_sel("5s", dur == "5"), callback_data="k25t_dur:5"),
             InlineKeyboardButton(_sel("10s", dur == "10"), callback_data="k25t_dur:10"),
         ],
-        [InlineKeyboardButton("LANJUTKAN", callback_data="k25t_continue")],
-        [InlineKeyboardButton("Kembali ke Menu Utama", callback_data="back_main")],
+        [InlineKeyboardButton("▶️ LANJUTKAN", callback_data="k25t_continue")],
+        [InlineKeyboardButton("⬅️ Kembali ke Menu Utama", callback_data="back_main")],
     ])
     return message, keyboard
 
@@ -209,7 +209,7 @@ def get_kling_v3_config_keyboard(state: UserState) -> tuple[str, InlineKeyboardM
     dur = state.duration or "5"
 
     message = (
-        f"*KONFIGURASI KLING V3*\n\n"
+        f"🎬 *KONFIGURASI KLING V3*\n\n"
         f"Resolusi : *{res}p*\n"
         f"Durasi   : *{dur}s*\n\n"
         f"*Pilih parameter di bawah.*"
@@ -220,8 +220,8 @@ def get_kling_v3_config_keyboard(state: UserState) -> tuple[str, InlineKeyboardM
             InlineKeyboardButton(_sel("720p", res == "720"), callback_data="kv3_res:720"),
             InlineKeyboardButton(_sel("1080p", res == "1080"), callback_data="kv3_res:1080"),
         ],
-        [InlineKeyboardButton("LANJUTKAN", callback_data="kv3_continue")],
-        [InlineKeyboardButton("Kembali ke Menu Utama", callback_data="back_main")],
+        [InlineKeyboardButton("▶️ LANJUTKAN", callback_data="kv3_continue")],
+        [InlineKeyboardButton("⬅️ Kembali ke Menu Utama", callback_data="back_main")],
     ])
     return message, keyboard
 
@@ -230,7 +230,7 @@ def get_kling_o1_config_keyboard(state: UserState) -> tuple[str, InlineKeyboardM
     res = state.resolution or "720"
 
     message = (
-        f"*KONFIGURASI KLING O1*\n\n"
+        f"🎬 *KONFIGURASI KLING O1*\n\n"
         f"Resolusi : *{res}p*\n\n"
         f"*Pilih parameter di bawah.*"
     )
@@ -240,7 +240,7 @@ def get_kling_o1_config_keyboard(state: UserState) -> tuple[str, InlineKeyboardM
             InlineKeyboardButton(_sel("720p", res == "720"), callback_data="ko1_res:720"),
             InlineKeyboardButton(_sel("1080p", res == "1080"), callback_data="ko1_res:1080"),
         ],
-        [InlineKeyboardButton("LANJUTKAN", callback_data="ko1_continue")],
-        [InlineKeyboardButton("Kembali ke Menu Utama", callback_data="back_main")],
+        [InlineKeyboardButton("▶️ LANJUTKAN", callback_data="ko1_continue")],
+        [InlineKeyboardButton("⬅️ Kembali ke Menu Utama", callback_data="back_main")],
     ])
     return message, keyboard

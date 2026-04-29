@@ -49,7 +49,7 @@ async def finalize_job(
     if not status_msg_id:
         msg = await bot.send_message(
             chat_id=chat_id,
-            text="*Menyiapkan request AI...*",
+            text="⏳ *Menyiapkan request AI...*",
             parse_mode="Markdown",
         )
         status_msg_id = msg.message_id
@@ -61,7 +61,7 @@ async def finalize_job(
                 await bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=status_msg_id,
-                    text="Mengirim data...",
+                    text="⏳ Mengirim data...",
                 )
             except Exception:
                 pass
@@ -79,7 +79,7 @@ async def finalize_job(
             await bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=status_msg_id,
-                text="Mengirim data...",
+                text="⏳ Mengirim data...",
             )
         except Exception:
             pass
@@ -110,7 +110,7 @@ async def finalize_job(
             await bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=status_msg_id,
-                text=f"Error: 400 - {result['error']}",
+                text=f"❌ Error: 400 - {result['error']}",
             )
             return
 
@@ -132,7 +132,7 @@ async def finalize_job(
             await bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=status_msg_id,
-                text="Error: 500 - Gagal mendapatkan Task ID dari API.",
+                text="❌ Error: 500 - Gagal mendapatkan Task ID dari API.",
             )
             return
 
@@ -159,7 +159,7 @@ async def finalize_job(
             await bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=status_msg_id,
-                text="Mengirim data...",
+                text="⏳ Mengirim data...",
             )
         except Exception:
             pass
@@ -186,7 +186,7 @@ async def finalize_job(
             await bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=status_msg_id,
-                text=f"Error: {exc}",
+                text=f"❌ Error: {exc}",
             )
         except Exception:
             pass

@@ -40,20 +40,20 @@ class MemberManager:
         try:
             resp = (
                 supabase.table("settings")
-                .select("key, value")
-                .like("key", "custom_limit_%")
+                .select("id, data")
+                .eq("id", "custom_limits")
                 .execute()
             )
-            for row in resp.data or []:
-                parts = row["key"].split("_")
-                user_id = parts[-1]
-                limit_type = parts[-2]  # daily or max
-                if user_id not in self._custom_limits:
-                    self._custom_limits[user_id] = {}
-                try:
-                    self._custom_limits[user_id][limit_type] = int(row["value"])
-                except (ValueError, TypeError):
-                    pass
+            if resp.data and resp.data[0].get("data"):
+                limits_data = resp.data[0]["data"]
+                for user_id, limits in limits_data.items():
+                    if isinstance(limits, dict):
+                        self._custom_limits[user_id] = {}
+                        for limit_type, val in limits.items():
+                            try:
+                                self._custom_limits[user_id][limit_type] = int(val)
+                            except (ValueError, TypeError):
+                                pass
             logger.info(
                 "Loaded custom limits for %d users.", len(self._custom_limits)
             )

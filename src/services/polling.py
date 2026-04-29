@@ -146,12 +146,12 @@ async def poll_job_status(
                         pass
 
                 status_code = job_data.get("code", "500")
-                error_detail = job_data.get("message", "Generate Gagal")
+                error_detail = job_data.get("message", "❌ Generate Gagal")
                 try:
                     await bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=status_msg_id,
-                        text=f"Error: {status_code} - {error_detail}",
+                        text=f"❌ Error: {status_code} - {error_detail}",
                     )
                 except Exception:
                     pass
@@ -178,7 +178,7 @@ async def poll_job_status(
         await bot.edit_message_text(
             chat_id=chat_id,
             message_id=status_msg_id,
-            text="Error: 408 - Timeout. Job tidak selesai dalam 30 menit.",
+            text="❌ Error: 408 - Timeout. Job tidak selesai dalam 30 menit.",
         )
     except Exception:
         pass

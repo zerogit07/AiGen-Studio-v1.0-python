@@ -71,11 +71,11 @@ async def render_kling_v3_panel(
 
     # Panel title
     if is_kling_o1:
-        title = "KLING O1 GENERATOR"
+        title = "🎬 KLING O1 GENERATOR"
     elif state.model_type == "kling_v3_omni":
-        title = "KLING V3 OMNI GENERATOR"
+        title = "🎬 KLING V3 OMNI GENERATOR"
     else:
-        title = "KLING V3 GENERATOR"
+        title = "🎬 KLING V3 GENERATOR"
 
     current_dur_num = int(state.duration.replace("s", "")) if state.duration else 5
     total_shot_dur = sum(s.get("duration", 0) for s in state.shots)
@@ -104,7 +104,7 @@ async def render_kling_v3_panel(
                     row = []
             if row:
                 buttons.append(row)
-        buttons.append([InlineKeyboardButton("Kembali", callback_data="kv3_close_subpanel")])
+        buttons.append([InlineKeyboardButton("⬅️ Kembali", callback_data="kv3_close_subpanel")])
 
         keyboard = InlineKeyboardMarkup(buttons)
         try:
@@ -136,7 +136,7 @@ async def render_kling_v3_panel(
                 InlineKeyboardButton("720p", callback_data="kv3_set_res_720p"),
                 InlineKeyboardButton("1080p", callback_data="kv3_set_res_1080p"),
             ],
-            [InlineKeyboardButton("Kembali", callback_data="kv3_close_subpanel")],
+            [InlineKeyboardButton("⬅️ Kembali", callback_data="kv3_close_subpanel")],
         ]
         keyboard = InlineKeyboardMarkup(buttons)
         try:
@@ -169,7 +169,7 @@ async def render_kling_v3_panel(
                 InlineKeyboardButton("9:16", callback_data="kv3_set_ratio_9:16"),
                 InlineKeyboardButton("1:1", callback_data="kv3_set_ratio_1:1"),
             ],
-            [InlineKeyboardButton("Kembali", callback_data="kv3_close_subpanel")],
+            [InlineKeyboardButton("⬅️ Kembali", callback_data="kv3_close_subpanel")],
         ]
         keyboard = InlineKeyboardMarkup(buttons)
         try:
@@ -197,18 +197,18 @@ async def render_kling_v3_panel(
     prompt_preview = state.prompt[:50] + "..." if len(state.prompt) > 50 else (state.prompt or "(kosong)")
 
     text = f"*{title}*\n{'─' * 20}\n\n"
-    text += f"Prompt: `{prompt_preview}`\n"
-    text += f"Resolusi: *{state.resolution}*\n"
-    text += f"Durasi: *{state.duration}*\n"
-    text += f"Ratio: *{state.ratio}*\n"
-    text += f"Audio: *{'On' if state.audio else 'Off'}*\n"
+    text += f"📝 Prompt: `{prompt_preview}`\n"
+    text += f"📺 Resolusi: *{state.resolution}*\n"
+    text += f"⏱ Durasi: *{state.duration}*\n"
+    text += f"📐 Ratio: *{state.ratio}*\n"
+    text += f"🔊 Audio: *{'On' if state.audio else 'Off'}*\n"
 
     if state.first_frame_url:
-        text += "First Frame: Uploaded\n"
+        text += "🖼 First Frame: Uploaded\n"
     if state.end_frame_url:
-        text += "End Frame: Uploaded\n"
+        text += "🖼 End Frame: Uploaded\n"
     if state.element_urls:
-        text += f"Element: {len(state.element_urls)} gambar\n"
+        text += f"🖼 Element: {len(state.element_urls)} gambar\n"
 
     if state.multi_shot_on and state.shots:
         text += f"\n*Multi-shot:* {len(state.shots)} shot(s)\n"
@@ -217,22 +217,22 @@ async def render_kling_v3_panel(
             text += f"  Shot {i + 1}: {s.get('duration', 5)}s - {sp or '(kosong)'}\n"
 
     text += f"\n{'─' * 20}\n"
-    text += "Pilih opsi di bawah untuk mengatur parameter:"
+    text += "🎯 Pilih opsi di bawah untuk mengatur parameter:"
 
     buttons: list[list[InlineKeyboardButton]] = []
 
     # Prompt button
-    buttons.append([InlineKeyboardButton("Edit Prompt", callback_data="kv3_edit_prompt")])
+    buttons.append([InlineKeyboardButton("📝 Edit Prompt", callback_data="kv3_edit_prompt")])
 
     # Media buttons
     media_row: list[InlineKeyboardButton] = []
     media_row.append(InlineKeyboardButton(
-        "First Frame" if not state.first_frame_url else "First Frame (v)",
+        "🖼 First Frame" if not state.first_frame_url else "🖼 First Frame ✅",
         callback_data="kv3_upload_first_frame",
     ))
     if not is_kling_o1:
         media_row.append(InlineKeyboardButton(
-            "End Frame" if not state.end_frame_url else "End Frame (v)",
+            "🖼 End Frame" if not state.end_frame_url else "🖼 End Frame ✅",
             callback_data="kv3_upload_end_frame",
         ))
     buttons.append(media_row)

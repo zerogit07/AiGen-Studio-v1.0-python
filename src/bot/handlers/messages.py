@@ -409,5 +409,5 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 status_msg_id=status_msg.message_id,
             )
         else:
-            await update.message.reply_text("Gambar diterima! Sekarang kirimkan prompt teks Anda:")
+            await update.message.reply_text("🖼 Gambar diterima! Sekarang kirimkan prompt teks Anda:")
         return
