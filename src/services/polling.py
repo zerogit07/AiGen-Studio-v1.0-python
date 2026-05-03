@@ -6,9 +6,11 @@ import logging
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
+from src.core.types import TripleSet
 from src.database.client import supabase
 from src.database.members import member_manager
-from src.services.request_engine import request_engine
+from src.database.usage import usage_manager
+from src.services.request_engine import RequestEngineHTTPError, request_engine
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +21,7 @@ def mark_buttons_used(msg_id: int, chat_id: int) -> None:
     used_action_buttons.add(f"{chat_id}:{msg_id}")
 
 
-async def poll_job_status(
+async def watch_generation(
     bot,
     chat_id: int,
     user_id: int,
@@ -29,6 +31,7 @@ async def poll_job_status(
     prompt: str,
     used_key: str,
     original_model_id: str,
+    triple_set: TripleSet | None = None,
 ) -> None:
     """Poll the Freepik API for job completion."""
     retry_count = 0
@@ -51,7 +54,8 @@ async def poll_job_status(
             result = await request_engine(
                 method="GET",
                 url=url,
-                force_api_key=used_key,
+                force_api_key=None if triple_set else used_key,
+                triple_set=triple_set,
             )
 
             job_data = result["data"].get("data", result["data"])
@@ -62,7 +66,6 @@ async def poll_job_status(
                 "pending", "queued_waiting", "init", "waiting",
             }
 
-            # Extract result URL
             output = job_data.get("output", {})
             result_url = None
             if isinstance(output, dict):
@@ -88,9 +91,10 @@ async def poll_job_status(
 
             if status in ("completed", "done", "success") and result_url:
                 await member_manager.end_process(user_id)
+                await usage_manager.increment_usage(user_id)
                 if supabase:
                     try:
-                        supabase.table("jobs").update({"status": "completed"}).eq(
+                        await supabase.table("jobs").update({"status": "completed"}).eq(
                             "job_id", job_id
                         ).execute()
                     except Exception:
@@ -105,13 +109,11 @@ async def poll_job_status(
                 show_buttons = action_key not in used_action_buttons
                 reply_markup = keyboard if show_buttons else None
 
-                # Delete progress message
                 try:
                     await bot.delete_message(chat_id=chat_id, message_id=status_msg_id)
                 except Exception:
                     pass
 
-                # Send result
                 try:
                     if is_image_model:
                         await bot.send_photo(
@@ -135,41 +137,44 @@ async def poll_job_status(
                 used_action_buttons.discard(action_key)
                 return
 
-            elif status in ("failed", "error"):
+            if status in ("failed", "error"):
                 await member_manager.end_process(user_id)
                 if supabase:
                     try:
-                        supabase.table("jobs").update({"status": "failed"}).eq(
+                        await supabase.table("jobs").update({"status": "failed"}).eq(
                             "job_id", job_id
                         ).execute()
                     except Exception:
                         pass
 
                 status_code = job_data.get("code", "500")
-                error_detail = job_data.get("message", "❌ Generate Gagal")
+                error_detail = job_data.get("message", "Generate gagal")
+                logger.error("Job %s failed: %s - %s", job_id, status_code, error_detail)
                 try:
                     await bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=status_msg_id,
-                        text=f"❌ Error: {status_code} - {error_detail}",
+                        text="Generate gagal. Silakan coba lagi.",
                     )
                 except Exception:
                     pass
                 used_action_buttons.discard(action_key)
                 return
 
-            elif status in in_progress_statuses:
-                # Still processing, continue polling
-                pass
+            if status in in_progress_statuses:
+                continue
 
+        except RequestEngineHTTPError as exc:
+            if exc.status_code in (403, 429):
+                raise
+            logger.error("Polling HTTP error for job %s: %s", job_id, exc)
         except Exception as exc:
             logger.error("Polling error for job %s: %s", job_id, exc)
 
-    # Timeout
     await member_manager.end_process(user_id)
     if supabase:
         try:
-            supabase.table("jobs").update({"status": "failed"}).eq(
+            await supabase.table("jobs").update({"status": "failed"}).eq(
                 "job_id", job_id
             ).execute()
         except Exception:
@@ -178,8 +183,11 @@ async def poll_job_status(
         await bot.edit_message_text(
             chat_id=chat_id,
             message_id=status_msg_id,
-            text="❌ Error: 408 - Timeout. Job tidak selesai dalam 30 menit.",
+            text="Timeout. Generate tidak selesai dalam 30 menit. Silakan coba lagi.",
         )
     except Exception:
         pass
     used_action_buttons.discard(action_key)
+
+
+poll_job_status = watch_generation

@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
+from src.core.types import TripleSet
 from src.services.request_engine import request_engine
 from src.services.models import (
     kling_v3_pro,
@@ -52,10 +53,20 @@ class GenerateParams:
     camera_config: Optional[dict] = None
 
 
-async def _send_request(endpoint: str, status_path: str, payload: dict) -> dict:
+async def _send_request(
+    endpoint: str,
+    status_path: str,
+    payload: dict,
+    triple_set: TripleSet | None = None,
+) -> dict:
     url = f"{BASE_URL}/{endpoint}"
     try:
-        result = await request_engine(method="POST", url=url, json_data=payload)
+        result = await request_engine(
+            method="POST",
+            url=url,
+            json_data=payload,
+            triple_set=triple_set,
+        )
         return {
             "data": result["data"],
             "used_key": result["used_key"],
@@ -117,7 +128,10 @@ MODEL_HANDLERS = {
 }
 
 
-async def submit_video_generation(params: GenerateParams) -> dict:
+async def submit_video_generation(
+    params: GenerateParams,
+    triple_set: TripleSet | None = None,
+) -> dict:
     """POST - Create task (generate video/image)."""
     model_id = params.model_id
     module = MODEL_HANDLERS.get(model_id)
@@ -125,7 +139,16 @@ async def submit_video_generation(params: GenerateParams) -> dict:
         raise RuntimeError(f"Model handler not found for: {model_id}")
 
     logger.info("[%s] Submitting via %s", model_id, module.__name__)
-    return await module.create_task(params, _send_request)
+
+    async def bound_send_request(endpoint: str, status_path: str, payload: dict) -> dict:
+        return await _send_request(
+            endpoint=endpoint,
+            status_path=status_path,
+            payload=payload,
+            triple_set=triple_set,
+        )
+
+    return await module.create_task(params, bound_send_request)
 
 
 async def get_task_status(model_id: str, task_id: str, api_key: str) -> dict:

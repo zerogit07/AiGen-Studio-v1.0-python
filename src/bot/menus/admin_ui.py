@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import math
+import time
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.core.types import ProxyEntry
@@ -140,17 +143,31 @@ def get_manage_proxies_keyboard() -> InlineKeyboardMarkup:
 
 
 def get_member_dashboard(members: dict, member_count: int, trial_count: int) -> tuple[str, InlineKeyboardMarkup]:
+    lite_count = sum(1 for m in members.values() if m.plan.lower() == "lite")
+    pro_count = sum(1 for m in members.values() if m.plan.lower() == "pro")
+    ultra_count = sum(1 for m in members.values() if m.plan.lower() == "ultra")
+
+    total_count = len(members)
+
     message = (
         "\U0001f465 *Manajemen Member*\n\n"
         "\U0001f4ca *Statistik:*\n"
-        f"- Total Member: {member_count}\n"
-        f"- Trial: {trial_count}\n\n"
+        f"- Lite: {lite_count}\n"
+        f"- Pro: {pro_count}\n"
+        f"- Ultra: {ultra_count}\n"
+        f"- Trial: {trial_count}\n"
+        f"- Total: {total_count}\n\n"
         "Pilih menu di bawah:"
     )
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("\u2795 Tambah Member", callback_data="add_member_btn")],
-        [InlineKeyboardButton("\U0001f4cb Lihat Member", callback_data="list_member_btn")],
-        [InlineKeyboardButton("\U0001f5d1 Hapus Member", callback_data="remove_member_btn")],
+        [
+            InlineKeyboardButton("\u2795 Tambah Member", callback_data="add_member_btn"),
+            InlineKeyboardButton("\U0001f4cb Lihat Member", callback_data="list_member_btn"),
+        ],
+        [
+            InlineKeyboardButton("\U0001f5d1 Hapus Member", callback_data="remove_member_btn"),
+            InlineKeyboardButton("\U0001f510 Manajemen", callback_data="manage_members"),
+        ],
         [InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="admin_panel_back")],
     ])
     return message, keyboard
@@ -158,8 +175,159 @@ def get_member_dashboard(members: dict, member_count: int, trial_count: int) -> 
 
 def get_manage_members_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("\U0001f7e2 Aktifkan Semua", callback_data="enable_all_members")],
+        [InlineKeyboardButton("\U0001f534 Nonaktifkan Semua", callback_data="disable_all_members")],
+        [InlineKeyboardButton("\U0001f5d1 Hapus Semua", callback_data="delete_all_members")],
         [InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="admin_member")],
     ])
+
+
+def get_member_list_keyboard(
+    members_list: list, page: int = 1, per_page: int = 15
+) -> tuple[str, InlineKeyboardMarkup]:
+    total = len(members_list)
+    total_pages = math.ceil(total / per_page)
+    if total_pages == 0:
+        total_pages = 1
+    if page < 1:
+        page = 1
+    elif page > total_pages:
+        page = total_pages
+
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    page_items = members_list[start_idx:end_idx]
+
+    message = f"\U0001f465 *Daftar Member (Halaman {page}/{total_pages})*\n\n"
+
+    keyboard = []
+    for uid, m in page_items:
+        uid_str = str(uid)
+        status_icon = "\U0001f7e2" if m.active else "\U0001f534"
+        uid_short = uid_str[:8] + ".." if len(uid_str) > 8 else uid_str
+
+        row = [
+            InlineKeyboardButton(f"\U0001f464 {uid_short}", callback_data=f"v_mem:{uid_str}"),
+            InlineKeyboardButton("\U0001f441\ufe0f", callback_data=f"v_mem:{uid_str}"),
+            InlineKeyboardButton(status_icon, callback_data=f"t_mem:{uid_str}"),
+            InlineKeyboardButton("\U0001f5d1\ufe0f", callback_data=f"d_mem:{uid_str}"),
+        ]
+        keyboard.append(row)
+
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton("\u2b05\ufe0f Prev", callback_data=f"p_mem:{page - 1}"))
+    if page < total_pages:
+        nav_row.append(InlineKeyboardButton("Next \u27a1\ufe0f", callback_data=f"p_mem:{page + 1}"))
+
+    if nav_row:
+        keyboard.append(nav_row)
+
+    keyboard.append([InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="admin_member")])
+
+    return message, InlineKeyboardMarkup(keyboard)
+
+
+def get_proxy_list_keyboard(
+    proxies_list: list, page: int = 1, per_page: int = 10
+) -> tuple[str, InlineKeyboardMarkup]:
+    total = len(proxies_list)
+    total_pages = math.ceil(total / per_page)
+    if total_pages == 0:
+        total_pages = 1
+    if page < 1:
+        page = 1
+    elif page > total_pages:
+        page = total_pages
+
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    page_items = proxies_list[start_idx:end_idx]
+
+    message = f"\U0001f310 *Daftar Proxy (Halaman {page}/{total_pages})*\n\n"
+
+    keyboard = []
+    for i, p in enumerate(page_items):
+        actual_idx = start_idx + i
+        status_icon = "\U0001f7e2" if p.active else "\U0001f534"
+        url = p.proxy
+        url_short = url[:15] + ".." if len(url) > 15 else url
+
+        row = [
+            InlineKeyboardButton(f"\U0001f310 {url_short}", callback_data=f"v_prx:{actual_idx}"),
+            InlineKeyboardButton("\U0001f441\ufe0f", callback_data=f"v_prx:{actual_idx}"),
+            InlineKeyboardButton(status_icon, callback_data=f"t_prx:{actual_idx}"),
+            InlineKeyboardButton("\U0001f5d1\ufe0f", callback_data=f"d_prx:{actual_idx}"),
+        ]
+        keyboard.append(row)
+
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton("\u2b05\ufe0f Prev", callback_data=f"p_prx:{page - 1}"))
+    if page < total_pages:
+        nav_row.append(InlineKeyboardButton("Next \u27a1\ufe0f", callback_data=f"p_prx:{page + 1}"))
+
+    if nav_row:
+        keyboard.append(nav_row)
+
+    keyboard.append([InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="admin_proxy")])
+
+    return message, InlineKeyboardMarkup(keyboard)
+
+
+def get_key_list_keyboard(
+    keys_list: list, page: int = 1, per_page: int = 10
+) -> tuple[str, InlineKeyboardMarkup]:
+    total = len(keys_list)
+    total_pages = math.ceil(total / per_page)
+    if total_pages == 0:
+        total_pages = 1
+    if page < 1:
+        page = 1
+    elif page > total_pages:
+        page = total_pages
+
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    page_items = keys_list[start_idx:end_idx]
+
+    message = f"\U0001f511 *Daftar API Key (Halaman {page}/{total_pages})*\n\n"
+
+    keyboard = []
+    now_ms = int(time.time() * 1000)
+    for i, k in enumerate(page_items):
+        actual_idx = start_idx + i
+        is_cd = k.active and k.cooldown_until > now_ms
+        if is_cd:
+            status_icon = "\U0001f7e1"
+        elif k.active:
+            status_icon = "\U0001f7e2"
+        else:
+            status_icon = "\U0001f534"
+
+        key_str = k.key
+        key_short = key_str[:12] + ".." if len(key_str) > 12 else key_str
+
+        row = [
+            InlineKeyboardButton(f"\U0001f511 {key_short}", callback_data=f"v_key:{actual_idx}"),
+            InlineKeyboardButton("\U0001f441\ufe0f", callback_data=f"v_key:{actual_idx}"),
+            InlineKeyboardButton(status_icon, callback_data=f"t_key:{actual_idx}"),
+            InlineKeyboardButton("\U0001f5d1\ufe0f", callback_data=f"d_key:{actual_idx}"),
+        ]
+        keyboard.append(row)
+
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton("\u2b05\ufe0f Prev", callback_data=f"p_key:{page - 1}"))
+    if page < total_pages:
+        nav_row.append(InlineKeyboardButton("Next \u27a1\ufe0f", callback_data=f"p_key:{page + 1}"))
+
+    if nav_row:
+        keyboard.append(nav_row)
+
+    keyboard.append([InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="api_mgmt_menu")])
+
+    return message, InlineKeyboardMarkup(keyboard)
 
 
 def get_model_management_keyboard() -> InlineKeyboardMarkup:
@@ -176,9 +344,10 @@ def get_manage_models_keyboard(models: list[dict]) -> tuple[str, InlineKeyboardM
     for m in models:
         status_icon = "\U0001f7e2 ON" if m["active"] else "\U0001f534 OFF"
         lines.append(f"- {m['name']}: {status_icon}")
+        btn_text = ("\U0001f534 OFF" if m["active"] else "\U0001f7e2 ON") + f" {m['name']}"
         buttons.append([
             InlineKeyboardButton(
-                f"{'\U0001f534 OFF' if m['active'] else '\U0001f7e2 ON'} {m['name']}",
+                btn_text,
                 callback_data=f"toggle_model:{m['id']}",
             )
         ])
@@ -190,10 +359,10 @@ def get_api_key_dashboard(keys: list, active_count: int, cooldown_count: int, de
     message = (
         "\U0001f511 *Manajemen API Key*\n\n"
         "\U0001f4ca *Statistik:*\n"
-        f"- Total Key: {len(keys)}\n"
         f"- Aktif: \U0001f7e2 {active_count}\n"
         f"- Cooldown: \U0001f7e1 {cooldown_count}\n"
-        f"- Mati: \U0001f534 {dead_count}\n\n"
+        f"- Mati: \U0001f534 {dead_count}\n"
+        f"- Total: {len(keys)}\n\n"
         "Pilih menu di bawah:"
     )
     keyboard = InlineKeyboardMarkup([
@@ -213,6 +382,8 @@ def get_api_key_dashboard(keys: list, active_count: int, cooldown_count: int, de
 def get_manage_keys_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("\U0001f7e2 Aktifkan Semua", callback_data="enable_all_keys")],
+        [InlineKeyboardButton("\U0001f534 Nonaktifkan Semua", callback_data="disable_all_keys")],
+        [InlineKeyboardButton("\U0001f5d1 Hapus Semua", callback_data="delete_all_keys")],
         [InlineKeyboardButton("\u2b05\ufe0f Kembali", callback_data="api_mgmt_menu")],
     ])
 

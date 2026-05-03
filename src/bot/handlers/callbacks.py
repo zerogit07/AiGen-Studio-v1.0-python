@@ -4,7 +4,7 @@ import logging
 import random
 import time
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, Update
 from telegram.ext import ContextTypes
 
 from src.bot.handlers.commands import handle_start_command
@@ -13,17 +13,21 @@ from src.bot.menus.admin_ui import (
     get_api_key_dashboard,
     get_backup_management_keyboard,
     get_home_page_keyboard,
+    get_key_list_keyboard,
     get_landing_page_keyboard,
     get_limit_page_keyboard,
     get_manage_keys_keyboard,
+    get_manage_members_keyboard,
     get_manage_models_keyboard,
     get_manage_proxies_keyboard,
     get_member_dashboard,
+    get_member_list_keyboard,
     get_message_management_keyboard,
     get_model_management_keyboard,
     get_payment_page_keyboard,
     get_price_page_keyboard,
     get_proxy_dashboard,
+    get_proxy_list_keyboard,
     get_stats_menu_keyboard,
     get_usage_history_message,
 )
@@ -48,24 +52,40 @@ from src.database.proxies import proxy_manager
 from src.database.settings import landing_page_manager
 from src.database.usage import usage_manager
 from src.database.users import user_manager
-from src.services.jobs import finalize_job
+from src.core.queue import add_check_single_key_job, add_job, init_key_check_batch, add_check_batch_timeout_job
 from src.services.polling import mark_buttons_used
 from src.services.stats import global_logs, global_stats
 
 logger = logging.getLogger(__name__)
 
 
+async def _safe_answer(query):
+    try:
+        await query.answer()
+    except Exception:
+        pass
+
+
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    t0 = time.time()
     query = update.callback_query
     if not query or not query.data:
         return
-    await query.answer()
+
+    try:
+        await query.answer()
+    except Exception:
+        pass
+    t_answer = time.time()
 
     user_id = query.from_user.id
     data = query.data
     chat_id = update.effective_chat.id
-    logger.info("[CallbackQuery] User: %d, Data: %s", user_id, data)
+    logger.info("[CallbackQuery] User: %d, Data: %s | Answer took: %.2fs", user_id, data, t_answer - t0)
+
     state = await get_or_create_state(user_id, query.from_user.username, query.from_user.first_name, query.from_user.last_name)
+    t_state = time.time()
+    logger.info("[CallbackQuery] State loaded in %.2fs", t_state - t_answer)
 
     # ─── KV3 Panel Callbacks ─────────────────────────────
     kv3 = get_kv3_state(user_id)
@@ -184,13 +204,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         else:
             state.kling3_mode = "single"
 
-        await finalize_job(
-            bot=context.bot,
-            chat_id=chat_id,
+        job_id = await add_job(
             user_id=user_id,
-            state=state,
+            chat_id=chat_id,
             prompt=kv3.prompt,
             model_id=kv3.model_type,
+            state=state,
+        )
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f"Permintaanmu masuk antrian. ID job: #{job_id}",
         )
         return
 
@@ -601,10 +624,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
         try:
             await query.edit_message_media(
-                media={"type": "photo", "media": payment_image, "caption": message, "parse_mode": "Markdown"},
+                media=InputMediaPhoto(media=payment_image, caption=message, parse_mode="Markdown"),
                 reply_markup=keyboard,
             )
         except Exception:
+            try:
+                await query.message.delete()
+            except Exception:
+                pass
             await context.bot.send_photo(chat_id=chat_id, photo=payment_image, caption=message, parse_mode="Markdown", reply_markup=keyboard)
         return
 
@@ -614,7 +641,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if data == "free_trial":
         existing = await member_manager.sync_member(user_id)
-        if existing:
+        has_used_trial = await member_manager.has_used_trial(user_id)
+        if existing or has_used_trial:
             await context.bot.send_message(chat_id=chat_id, text="\u274c Anda sudah pernah menggunakan Free Trial.")
             return
         await member_manager.add_member(user_id, "testing", days=30, testing_quota=3)
@@ -696,11 +724,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data == "add_key_btn":
+        if not is_user_admin(user_id, state):
+            return
         state.awaiting_api_key = True
         await context.bot.send_message(chat_id=chat_id, text="🔑 Kirimkan API Key Freepik (satu per baris):")
         return
 
     if data == "test_keys_btn":
+        if not is_user_admin(user_id, state):
+            return
         await context.bot.send_message(chat_id=chat_id, text="⏳ Sedang menguji semua key...")
         result = await api_key_manager.test_all_keys()
         await context.bot.send_message(
@@ -711,6 +743,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data == "enable_all_keys":
+        if not is_user_admin(user_id, state):
+            return
         await api_key_manager.enable_all()
         keys = api_key_manager.get_all_keys()
         now = int(time.time() * 1000)
@@ -725,6 +759,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data == "manage_keys":
+        if not is_user_admin(user_id, state):
+            return
         try:
             await query.edit_message_text(text="🔑 *Manajemen Key*", parse_mode="Markdown", reply_markup=get_manage_keys_keyboard())
         except Exception:
@@ -732,6 +768,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data == "list_keys_btn":
+        if not is_user_admin(user_id, state):
+            return
         keys = api_key_manager.get_all_keys()
         back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Kembali", callback_data="api_mgmt_menu")]])
         if not keys:
@@ -763,11 +801,15 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data == "add_proxy_btn":
+        if not is_user_admin(user_id, state):
+            return
         state.waiting_proxy = True
         await context.bot.send_message(chat_id=chat_id, text="🌐 Kirimkan proxy (satu per baris, format: http://user:pass@host:port):")
         return
 
     if data == "check_proxy_btn":
+        if not is_user_admin(user_id, state):
+            return
         await context.bot.send_message(chat_id=chat_id, text="⏳ Sedang mengecek semua proxy...")
         result = await proxy_manager.check_all_proxies()
         await context.bot.send_message(
@@ -778,6 +820,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data == "manage_proxies":
+        if not is_user_admin(user_id, state):
+            return
         try:
             await query.edit_message_text(text="🌐 *Manajemen Proxy*", parse_mode="Markdown", reply_markup=get_manage_proxies_keyboard())
         except Exception:
@@ -785,6 +829,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data == "enable_all_proxies":
+        if not is_user_admin(user_id, state):
+            return
         await proxy_manager.enable_all()
         msg, kb = get_proxy_dashboard(proxy_manager.get_all_proxies())
         try:
@@ -794,6 +840,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data == "disable_all_proxies":
+        if not is_user_admin(user_id, state):
+            return
         await proxy_manager.disable_all()
         msg, kb = get_proxy_dashboard(proxy_manager.get_all_proxies())
         try:
@@ -803,6 +851,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data == "delete_all_proxies":
+        if not is_user_admin(user_id, state):
+            return
         await proxy_manager.delete_all()
         msg, kb = get_proxy_dashboard(proxy_manager.get_all_proxies())
         try:
@@ -866,12 +916,276 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     if data == "add_member_btn":
+        if not is_user_admin(user_id, state):
+            return
         state.waiting_add_member = True
         await context.bot.send_message(
             chat_id=chat_id,
             text="👥 Kirimkan dalam format:\n`USER_ID PLAN HARI`\n\nContoh: `123456789 pro 30`",
             parse_mode="Markdown",
         )
+        return
+
+    if data == "list_member_btn":
+        if not is_user_admin(user_id, state):
+            return
+        members = member_manager.get_all_members()
+        if not members:
+            back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Kembali", callback_data="admin_member")]])
+            try:
+                await query.edit_message_text(text="❌ Tidak ada member.", reply_markup=back_kb)
+            except Exception:
+                await context.bot.send_message(chat_id=chat_id, text="❌ Tidak ada member.", reply_markup=back_kb)
+            return
+        kb = get_member_list_keyboard(members, page=state.current_page)
+        try:
+            await query.edit_message_text(text="👥 *Daftar Member:*", parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="👥 *Daftar Member:*", parse_mode="Markdown", reply_markup=kb)
+        return
+
+    if data.startswith("member_page:"):
+        page = int(data.split(":")[1])
+        state.current_page = page
+        members = member_manager.get_all_members()
+        kb = get_member_list_keyboard(members, page=page)
+        try:
+            await query.edit_message_text(text="👥 *Daftar Member:*", parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            pass
+        return
+
+    if data == "list_proxy_btn":
+        if not is_user_admin(user_id, state):
+            return
+        proxies = proxy_manager.get_all_proxies()
+        if not proxies:
+            back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Kembali", callback_data="admin_proxy")]])
+            try:
+                await query.edit_message_text(text="❌ Tidak ada proxy.", reply_markup=back_kb)
+            except Exception:
+                await context.bot.send_message(chat_id=chat_id, text="❌ Tidak ada proxy.", reply_markup=back_kb)
+            return
+        kb = get_proxy_list_keyboard(proxies, page=state.current_page)
+        try:
+            await query.edit_message_text(text="🌐 *Daftar Proxy:*", parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="🌐 *Daftar Proxy:*", parse_mode="Markdown", reply_markup=kb)
+        return
+
+    if data.startswith("proxy_page:"):
+        page = int(data.split(":")[1])
+        state.current_page = page
+        proxies = proxy_manager.get_all_proxies()
+        kb = get_proxy_list_keyboard(proxies, page=page)
+        try:
+            await query.edit_message_text(text="🌐 *Daftar Proxy:*", parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            pass
+        return
+
+    if data.startswith("key_page:"):
+        page = int(data.split(":")[1])
+        state.current_page = page
+        keys = api_key_manager.get_all_keys()
+        kb = get_key_list_keyboard(keys, page=page)
+        try:
+            await query.edit_message_text(text="🔑 *Daftar API Key:*", parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            pass
+        return
+
+    if data == "manage_members":
+        if not is_user_admin(user_id, state):
+            return
+        try:
+            await query.edit_message_text(text="👥 *Manajemen Member*", parse_mode="Markdown", reply_markup=get_manage_members_keyboard())
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="👥 *Manajemen Member*", parse_mode="Markdown", reply_markup=get_manage_members_keyboard())
+        return
+
+    if data == "enable_all_members":
+        if not is_user_admin(user_id, state):
+            return
+        await member_manager.enable_all()
+        members = member_manager.get_all_members()
+        member_count = sum(1 for m in members.values() if m.plan in ("lite", "pro", "ultra"))
+        trial_count = sum(1 for m in members.values() if m.plan == "testing")
+        msg, kb = get_member_dashboard(members, member_count, trial_count)
+        try:
+            await query.edit_message_text(text=msg, parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="🟢 Semua member diaktifkan!")
+        return
+
+    if data == "disable_all_members":
+        if not is_user_admin(user_id, state):
+            return
+        await member_manager.disable_all()
+        members = member_manager.get_all_members()
+        member_count = sum(1 for m in members.values() if m.plan in ("lite", "pro", "ultra"))
+        trial_count = sum(1 for m in members.values() if m.plan == "testing")
+        msg, kb = get_member_dashboard(members, member_count, trial_count)
+        try:
+            await query.edit_message_text(text=msg, parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="🔴 Semua member dinonaktifkan!")
+        return
+
+    if data == "delete_all_members":
+        if not is_user_admin(user_id, state):
+            return
+        await member_manager.delete_all()
+        members = member_manager.get_all_members()
+        msg, kb = get_member_dashboard(members, 0, 0)
+        try:
+            await query.edit_message_text(text=msg, parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="🗑 Semua member dihapus!")
+        return
+
+    if data == "remove_member_btn":
+        if not is_user_admin(user_id, state):
+            return
+        state.waiting_check_user = False
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="🗑 Kirimkan User ID member yang ingin dihapus:",
+        )
+        state.step = "WAIT_REMOVE_MEMBER"
+        return
+
+    if data == "disable_all_keys":
+        if not is_user_admin(user_id, state):
+            return
+        await api_key_manager.disable_all()
+        keys = api_key_manager.get_all_keys()
+        now = int(time.time() * 1000)
+        active = sum(1 for k in keys if k.active and k.cooldown_until < now)
+        cooldown = sum(1 for k in keys if k.active and k.cooldown_until >= now)
+        dead = sum(1 for k in keys if not k.active)
+        msg, kb = get_api_key_dashboard(keys, active, cooldown, dead)
+        try:
+            await query.edit_message_text(text=msg, parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="🔴 Semua key dinonaktifkan!")
+        return
+
+    if data == "delete_all_keys":
+        if not is_user_admin(user_id, state):
+            return
+        await api_key_manager.delete_all()
+        keys = api_key_manager.get_all_keys()
+        msg, kb = get_api_key_dashboard(keys, 0, 0, 0)
+        try:
+            await query.edit_message_text(text=msg, parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="🗑 Semua key dihapus!")
+        return
+
+    if data == "admin_backup_members":
+        if not is_user_admin(user_id, state):
+            return
+        members = member_manager.get_all_members()
+        if not members:
+            await context.bot.send_message(chat_id=chat_id, text="❌ Tidak ada data member.")
+            return
+        lines = ["*Backup Data Member:*\n"]
+        for uid, m in members.items():
+            lines.append(f"- `{uid}` | {m.plan} | Active: {m.active} | Exp: {m.expire_date or '-'}")
+        text_out = "\n".join(lines)
+        if len(text_out) > 4000:
+            for i in range(0, len(text_out), 4000):
+                await context.bot.send_message(chat_id=chat_id, text=text_out[i:i+4000], parse_mode="Markdown")
+        else:
+            await context.bot.send_message(chat_id=chat_id, text=text_out, parse_mode="Markdown")
+        return
+
+    if data == "admin_backup_keys":
+        if not is_user_admin(user_id, state):
+            return
+        keys = api_key_manager.get_all_keys()
+        if not keys:
+            await context.bot.send_message(chat_id=chat_id, text="❌ Tidak ada data API key.")
+            return
+        lines = ["*Backup Data API Key:*\n"]
+        for i, k in enumerate(keys, 1):
+            status = "🟢" if k.active else "🔴"
+            lines.append(f"{i}. `{k.key}` {status}")
+        text_out = "\n".join(lines)
+        if len(text_out) > 4000:
+            for i in range(0, len(text_out), 4000):
+                await context.bot.send_message(chat_id=chat_id, text=text_out[i:i+4000], parse_mode="Markdown")
+        else:
+            await context.bot.send_message(chat_id=chat_id, text=text_out, parse_mode="Markdown")
+        return
+
+    if data == "admin_backup_proxies":
+        if not is_user_admin(user_id, state):
+            return
+        proxies = proxy_manager.get_all_proxies()
+        if not proxies:
+            await context.bot.send_message(chat_id=chat_id, text="❌ Tidak ada data proxy.")
+            return
+        lines = ["*Backup Data Proxy:*\n"]
+        for i, p in enumerate(proxies, 1):
+            status = "🟢" if p.active else "🔴"
+            lines.append(f"{i}. `{p.proxy}` {status}")
+        text_out = "\n".join(lines)
+        if len(text_out) > 4000:
+            for i in range(0, len(text_out), 4000):
+                await context.bot.send_message(chat_id=chat_id, text=text_out[i:i+4000], parse_mode="Markdown")
+        else:
+            await context.bot.send_message(chat_id=chat_id, text=text_out, parse_mode="Markdown")
+        return
+
+    if data == "admin_stats_trial":
+        if not is_user_admin(user_id, state):
+            return
+        trial_users = member_manager.get_members_by_plan("testing")
+        back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Kembali", callback_data="admin_stats")]])
+        if not trial_users:
+            try:
+                await query.edit_message_text(text="📋 Tidak ada user trial.", reply_markup=back_kb)
+            except Exception:
+                await context.bot.send_message(chat_id=chat_id, text="📋 Tidak ada user trial.", reply_markup=back_kb)
+            return
+        lines = ["*Daftar User Trial:*\n"]
+        for uid in trial_users:
+            m = member_manager.get_member_data(int(uid))
+            quota = m.testing_quota if m else 0
+            lines.append(f"- `{uid}` | Quota: {quota}")
+        try:
+            await query.edit_message_text(text="\n".join(lines), parse_mode="Markdown", reply_markup=back_kb)
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="\n".join(lines), parse_mode="Markdown", reply_markup=back_kb)
+        return
+
+    if data == "admin_stats_member":
+        if not is_user_admin(user_id, state):
+            return
+        members = member_manager.get_all_members()
+        paid_members = {uid: m for uid, m in members.items() if m.plan in ("lite", "pro", "ultra")}
+        back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Kembali", callback_data="admin_stats")]])
+        if not paid_members:
+            try:
+                await query.edit_message_text(text="📋 Tidak ada member berbayar.", reply_markup=back_kb)
+            except Exception:
+                await context.bot.send_message(chat_id=chat_id, text="📋 Tidak ada member berbayar.", reply_markup=back_kb)
+            return
+        lines = ["*Daftar Member Berbayar:*\n"]
+        for uid, m in paid_members.items():
+            status = "🟢" if m.active and not m.is_expired else "🔴"
+            lines.append(f"- `{uid}` | {m.plan} | {status} | Exp: {m.expire_date or '-'}")
+        text_out = "\n".join(lines)
+        if len(text_out) > 4000:
+            for i in range(0, len(text_out), 4000):
+                await context.bot.send_message(chat_id=chat_id, text=text_out[i:i+4000], parse_mode="Markdown")
+        else:
+            try:
+                await query.edit_message_text(text=text_out, parse_mode="Markdown", reply_markup=back_kb)
+            except Exception:
+                await context.bot.send_message(chat_id=chat_id, text=text_out, parse_mode="Markdown", reply_markup=back_kb)
         return
 
     # Stats

@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import logging
 from datetime import datetime, timezone
 
 import httpx
 
-from src.core.types import UserState
+from src.core.types import TripleSet, UserState
 from src.database.client import supabase
 from src.database.members import member_manager
 from src.database.usage import usage_manager
 from src.services.freepik_api import GenerateParams, submit_video_generation
-from src.services.polling import poll_job_status
+from src.services.polling import watch_generation
+from src.services.request_engine import RequestEngineHTTPError
 from src.services.stats import log_activity
 
 logger = logging.getLogger(__name__)
@@ -26,12 +26,13 @@ async def finalize_job(
     prompt: str,
     model_id: str,
     status_msg_id: int | None = None,
+    triple_set: TripleSet | None = None,
+    on_submit_done=None,
 ) -> None:
     member_data = member_manager.get_member_data(user_id)
     if not member_data:
         return
 
-    # Check queue limit
     can_start = await member_manager.start_process(user_id, member_data.plan)
     if not can_start:
         await bot.send_message(
@@ -39,13 +40,12 @@ async def finalize_job(
             text=(
                 f"*ANTRIAN PENUH*\n\nAnda telah mencapai batas maksimal proses "
                 f"simultan untuk paket *{member_data.plan}*. Mohon tunggu salah "
-                f"satu proses selesai atau gunakan perintah /reset."
+                f"satu proses selesai."
             ),
             parse_mode="Markdown",
         )
         return
 
-    # Send initial status if not provided
     if not status_msg_id:
         msg = await bot.send_message(
             chat_id=chat_id,
@@ -103,7 +103,7 @@ async def finalize_job(
             camera_config=state.camera_config,
         )
 
-        result = await submit_video_generation(params)
+        result = await submit_video_generation(params, triple_set=triple_set)
 
         if result.get("error"):
             await member_manager.end_process(user_id)
@@ -132,14 +132,13 @@ async def finalize_job(
             await bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=status_msg_id,
-                text="❌ Error: 500 - Gagal mendapatkan Task ID dari API.",
+                text="Gagal memulai generate. Silakan coba lagi.",
             )
             return
 
-        # Record job to database
         if supabase:
             try:
-                supabase.table("jobs").insert(
+                await supabase.table("jobs").upsert(
                     {
                         "job_id": str(job_id),
                         "user_id": str(user_id),
@@ -151,34 +150,36 @@ async def finalize_job(
             except Exception as exc:
                 logger.error("Error inserting job to DB: %s", exc)
 
-        # Log activity
         log_activity(user_id, model_id, prompt)
-        await usage_manager.increment_usage(user_id)
+
+        if on_submit_done:
+            await on_submit_done()
 
         try:
             await bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=status_msg_id,
-                text="⏳ Mengirim data...",
+                text="⏳ Menunggu hasil generate...",
             )
         except Exception:
             pass
 
-        # Start polling in background
-        asyncio.create_task(
-            poll_job_status(
-                bot=bot,
-                chat_id=chat_id,
-                user_id=user_id,
-                job_id=str(job_id),
-                status_path=final_status_path,
-                status_msg_id=status_msg_id,
-                prompt=prompt,
-                used_key=used_key,
-                original_model_id=model_id,
-            )
+        await watch_generation(
+            bot=bot,
+            chat_id=chat_id,
+            user_id=user_id,
+            job_id=str(job_id),
+            status_path=final_status_path,
+            status_msg_id=status_msg_id,
+            prompt=prompt,
+            used_key=used_key,
+            original_model_id=model_id,
+            triple_set=triple_set,
         )
 
+    except RequestEngineHTTPError:
+        await member_manager.end_process(user_id)
+        raise
     except Exception as exc:
         await member_manager.end_process(user_id)
         logger.error("Error in finalize_job: %s", exc)
@@ -190,3 +191,4 @@ async def finalize_job(
             )
         except Exception:
             pass
+        raise
