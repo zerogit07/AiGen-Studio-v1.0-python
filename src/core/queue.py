@@ -33,14 +33,9 @@ def _serialize_state(state: UserState | dict[str, Any] | None) -> dict[str, Any]
         "mode": state.mode,
         "kling3_mode": state.kling3_mode,
         "shots": [
-            {"prompt": shot.prompt, "duration": shot.duration}
-            for shot in state.shots
-            if isinstance(shot, Shot)
-        ]
-        or [
             {
-                "prompt": getattr(shot, "prompt", "") if not isinstance(shot, dict) else shot.get("prompt", ""),
-                "duration": getattr(shot, "duration", 5) if not isinstance(shot, dict) else shot.get("duration", 5),
+                "prompt": shot.prompt if isinstance(shot, Shot) else (shot.get("prompt", "") if isinstance(shot, dict) else ""),
+                "duration": shot.duration if isinstance(shot, Shot) else (shot.get("duration", 5) if isinstance(shot, dict) else 5),
             }
             for shot in state.shots
         ],

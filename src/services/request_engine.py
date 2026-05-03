@@ -11,6 +11,21 @@ from src.database.proxies import proxy_manager
 
 logger = logging.getLogger(__name__)
 
+_client_pool: dict[str, httpx.AsyncClient] = {}
+
+
+def _get_client(proxy_url: str | None) -> httpx.AsyncClient:
+    key = proxy_url or "__direct__"
+    if key not in _client_pool:
+        _client_pool[key] = httpx.AsyncClient(timeout=15, proxy=proxy_url)
+    return _client_pool[key]
+
+
+async def close_clients() -> None:
+    for client in _client_pool.values():
+        await client.aclose()
+    _client_pool.clear()
+
 
 class RequestEngineHTTPError(RuntimeError):
     def __init__(self, status_code: int, detail: str = "") -> None:
@@ -41,15 +56,15 @@ async def _request_once(
         "via Proxy" if proxy_url else "Direct",
     )
 
-    async with httpx.AsyncClient(timeout=15, proxy=proxy_url) as client:
-        response = await client.request(
-            method=method,
-            url=url,
-            headers=req_headers,
-            json=json_data,
-        )
-        response.raise_for_status()
-        return {"data": response.json(), "used_key": api_key}
+    client = _get_client(proxy_url)
+    response = await client.request(
+        method=method,
+        url=url,
+        headers=req_headers,
+        json=json_data,
+    )
+    response.raise_for_status()
+    return {"data": response.json(), "used_key": api_key}
 
 
 async def request_engine(

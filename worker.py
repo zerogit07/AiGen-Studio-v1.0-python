@@ -264,6 +264,14 @@ async def process_generation(
         status_msg_id = msg.message_id
 
     triple_set = await triple_pool.acquire()
+    released = False
+
+    async def _release_triple():
+        nonlocal released
+        if not released:
+            released = True
+            await triple_pool.release(triple_set)
+
     try:
         await finalize_job(
             bot=bot,
@@ -274,30 +282,29 @@ async def process_generation(
             model_id=model_id,
             status_msg_id=status_msg_id,
             triple_set=triple_set,
+            on_submit_done=_release_triple,
         )
     except RequestEngineHTTPError as exc:
         if exc.status_code in (403, 429):
             await triple_pool.mark_burned(triple_set)
+            released = True
             try:
                 await bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=status_msg_id,
-                    text=(
-                        f"Error: {exc.status_code} - API menolak request untuk set saat ini. "
-                        "Silakan coba lagi beberapa saat lagi."
-                    ),
+                    text="API sedang sibuk. Silakan coba lagi beberapa saat lagi.",
                 )
             except Exception:
                 pass
             return
 
-        await triple_pool.release(triple_set)
+        await _release_triple()
         raise
     except Exception:
-        await triple_pool.release(triple_set)
+        await _release_triple()
         raise
     else:
-        await triple_pool.release(triple_set)
+        await _release_triple()
 
 
 class WorkerSettings:

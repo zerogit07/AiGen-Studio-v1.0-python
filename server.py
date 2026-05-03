@@ -41,11 +41,18 @@ from src.database.proxies import proxy_manager
 from src.database.settings import landing_page_manager
 from src.database.usage import usage_manager
 from src.database.users import user_manager
+from src.services.request_engine import close_clients
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
+from logging.handlers import RotatingFileHandler
+
+log_fmt = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+logging.basicConfig(format=log_fmt, level=logging.INFO)
+
+os.makedirs("logs", exist_ok=True)
+file_handler = RotatingFileHandler("logs/bot.log", maxBytes=5 * 1024 * 1024, backupCount=3)
+file_handler.setFormatter(logging.Formatter(log_fmt))
+logging.getLogger().addHandler(file_handler)
+
 logger = logging.getLogger(__name__)
 
 bot_app: Application | None = None
@@ -124,6 +131,8 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    logger.info("Shutting down...")
+    await close_clients()
     if bot_app:
         logger.info("Shutting down bot application...")
         if bot_app.updater:
@@ -142,7 +151,21 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    from src.database.client import supabase
+    db_ok = supabase is not None
+    redis_ok = False
+    try:
+        redis_url = os.getenv("REDIS_URL")
+        if redis_url:
+            import redis as _redis
+            r = _redis.from_url(redis_url, socket_connect_timeout=2)
+            r.ping()
+            redis_ok = True
+            r.close()
+    except Exception:
+        pass
+    status = "ok" if db_ok and redis_ok else "degraded"
+    return {"status": status, "supabase": db_ok, "redis": redis_ok}
 
 
 def main() -> None:

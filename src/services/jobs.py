@@ -27,6 +27,7 @@ async def finalize_job(
     model_id: str,
     status_msg_id: int | None = None,
     triple_set: TripleSet | None = None,
+    on_submit_done=None,
 ) -> None:
     member_data = member_manager.get_member_data(user_id)
     if not member_data:
@@ -39,7 +40,7 @@ async def finalize_job(
             text=(
                 f"*ANTRIAN PENUH*\n\nAnda telah mencapai batas maksimal proses "
                 f"simultan untuk paket *{member_data.plan}*. Mohon tunggu salah "
-                f"satu proses selesai atau gunakan perintah /reset."
+                f"satu proses selesai."
             ),
             parse_mode="Markdown",
         )
@@ -131,13 +132,13 @@ async def finalize_job(
             await bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=status_msg_id,
-                text="❌ Error: 500 - Gagal mendapatkan Task ID dari API.",
+                text="Gagal memulai generate. Silakan coba lagi.",
             )
             return
 
         if supabase:
             try:
-                await supabase.table("jobs").insert(
+                await supabase.table("jobs").upsert(
                     {
                         "job_id": str(job_id),
                         "user_id": str(user_id),
@@ -150,7 +151,9 @@ async def finalize_job(
                 logger.error("Error inserting job to DB: %s", exc)
 
         log_activity(user_id, model_id, prompt)
-        await usage_manager.increment_usage(user_id)
+
+        if on_submit_done:
+            await on_submit_done()
 
         try:
             await bot.edit_message_text(

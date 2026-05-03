@@ -125,10 +125,10 @@ class MemberManager:
             expire_date = datetime.min.replace(tzinfo=timezone.utc)
 
         is_expired = now > expire_date
-        diff = abs((expire_date - now).days)
+        diff = (expire_date - now).days
 
         data.is_expired = is_expired
-        data.remaining_days = diff
+        data.remaining_days = max(0, diff) if not is_expired else 0
         data.is_member = True
         return data
 
@@ -242,6 +242,47 @@ class MemberManager:
                 await supabase.table("members").delete().eq("user_id", id_str).execute()
             except Exception:
                 pass
+
+    async def has_used_trial(self, user_id: int | str) -> bool:
+        if supabase:
+            try:
+                resp = (
+                    await supabase.table("members")
+                    .select("user_id")
+                    .eq("user_id", str(user_id))
+                    .eq("plan", "testing")
+                    .execute()
+                )
+                return bool(resp.data)
+            except Exception:
+                pass
+        return False
+
+    async def enable_all(self) -> None:
+        for m in self._members.values():
+            m.active = True
+        if supabase:
+            try:
+                await supabase.table("members").update({"active": True}).neq("user_id", "").execute()
+            except Exception as exc:
+                logger.error("Error enabling all members: %s", exc)
+
+    async def disable_all(self) -> None:
+        for m in self._members.values():
+            m.active = False
+        if supabase:
+            try:
+                await supabase.table("members").update({"active": False}).neq("user_id", "").execute()
+            except Exception as exc:
+                logger.error("Error disabling all members: %s", exc)
+
+    async def delete_all(self) -> None:
+        self._members.clear()
+        if supabase:
+            try:
+                await supabase.table("members").delete().neq("user_id", "").execute()
+            except Exception as exc:
+                logger.error("Error deleting all members: %s", exc)
 
     def get_all_members(self) -> dict[str, MemberData]:
         return self._members

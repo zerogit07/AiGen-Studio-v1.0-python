@@ -9,6 +9,7 @@ from telegram.ext import ContextTypes
 from src.core.types import TripleSet
 from src.database.client import supabase
 from src.database.members import member_manager
+from src.database.usage import usage_manager
 from src.services.request_engine import RequestEngineHTTPError, request_engine
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,7 @@ async def watch_generation(
 
             if status in ("completed", "done", "success") and result_url:
                 await member_manager.end_process(user_id)
+                await usage_manager.increment_usage(user_id)
                 if supabase:
                     try:
                         await supabase.table("jobs").update({"status": "completed"}).eq(
@@ -146,12 +148,13 @@ async def watch_generation(
                         pass
 
                 status_code = job_data.get("code", "500")
-                error_detail = job_data.get("message", "❌ Generate Gagal")
+                error_detail = job_data.get("message", "Generate gagal")
+                logger.error("Job %s failed: %s - %s", job_id, status_code, error_detail)
                 try:
                     await bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=status_msg_id,
-                        text=f"❌ Error: {status_code} - {error_detail}",
+                        text="Generate gagal. Silakan coba lagi.",
                     )
                 except Exception:
                     pass
@@ -180,7 +183,7 @@ async def watch_generation(
         await bot.edit_message_text(
             chat_id=chat_id,
             message_id=status_msg_id,
-            text="❌ Error: 408 - Timeout. Job tidak selesai dalam 30 menit.",
+            text="Timeout. Generate tidak selesai dalam 30 menit. Silakan coba lagi.",
         )
     except Exception:
         pass

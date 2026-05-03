@@ -25,10 +25,14 @@ from src.database.members import member_manager
 from src.database.models import model_manager
 from src.database.proxies import proxy_manager
 from src.database.settings import landing_page_manager
+from src.database.usage import usage_manager
 from src.database.users import user_manager
 from src.core.queue import add_job
 
 logger = logging.getLogger(__name__)
+
+_user_last_command: dict[int, float] = {}
+COMMAND_COOLDOWN = 2.0
 
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -40,6 +44,12 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user_id = user.id
     chat_id = update.effective_chat.id
     text = update.message.text
+
+    import time as _time
+    now = _time.time()
+    if user_id in _user_last_command and now - _user_last_command[user_id] < COMMAND_COOLDOWN:
+        return
+    _user_last_command[user_id] = now
 
     # Intercept for Kling V3 Panel inputs
     kv3 = get_kv3_state(user_id)
@@ -247,12 +257,16 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
         sent = 0
         failed = 0
-        for uid in users_to_send:
+        import asyncio as _asyncio
+        await update.message.reply_text(f"Mengirim broadcast ke {len(users_to_send)} user...")
+        for i, uid in enumerate(users_to_send):
             try:
                 await context.bot.send_message(chat_id=int(uid), text=text, parse_mode="Markdown")
                 sent += 1
             except Exception:
                 failed += 1
+            if (i + 1) % 25 == 0:
+                await _asyncio.sleep(1.0)
         await update.message.reply_text(
             f"*Broadcast Selesai*\n- Terkirim: {sent}\n- Gagal: {failed}",
             parse_mode="Markdown",
@@ -308,8 +322,52 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         return
 
+    # ─── Remove Member (Admin) ─────────────────────────
+    if state.step == "WAIT_REMOVE_MEMBER":
+        state.step = None
+        target_id = text.strip()
+        try:
+            await member_manager.remove_member(target_id)
+            await update.message.reply_text(f"Member `{target_id}` berhasil dihapus.", parse_mode="Markdown")
+        except Exception as exc:
+            logger.error("Error removing member %s: %s", target_id, exc)
+            await update.message.reply_text("Gagal menghapus member. Coba lagi.")
+        return
+
     # ─── Prompt Input (Generate) ─────────────────────────
     if state.step == "WAIT_PROMPT" and state.model:
+        member_data = await member_manager.sync_member(user_id)
+        if not member_data:
+            await update.message.reply_text("Anda belum terdaftar sebagai member. Silakan daftar terlebih dahulu.")
+            state.step = None
+            return
+        if member_data.is_expired and member_data.plan != "testing":
+            await update.message.reply_text("Membership Anda sudah expired. Silakan perpanjang.")
+            state.step = None
+            return
+        if not member_data.active:
+            await update.message.reply_text("Akun Anda sedang dinonaktifkan. Hubungi admin.")
+            state.step = None
+            return
+        usage_data = await usage_manager.get_usage(user_id)
+        daily_limit = member_manager.get_daily_limit(member_data.plan, user_id)
+        if usage_data.video_today >= daily_limit:
+            await update.message.reply_text(
+                f"Kuota harian Anda sudah habis ({usage_data.video_today}/{daily_limit}). Coba lagi besok.",
+            )
+            state.step = None
+            return
+        if member_data.plan == "testing" and member_data.testing_quota <= 0:
+            await update.message.reply_text("Kuota trial Anda sudah habis.")
+            state.step = None
+            return
+
+        is_maintenance = model_manager.is_maintenance()
+        if is_maintenance:
+            await update.message.reply_text("Bot sedang dalam mode maintenance. Coba lagi nanti.")
+            state.step = None
+            return
+
         state.temp_prompt = text
         state.step = None
         job_id = await add_job(
