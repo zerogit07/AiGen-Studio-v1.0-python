@@ -5,6 +5,7 @@ import logging
 import os
 import random
 
+import httpx
 from arq.connections import RedisSettings
 from arq.worker import Worker
 from dotenv import load_dotenv
@@ -86,6 +87,159 @@ async def shutdown(ctx: dict) -> None:
         await bot.shutdown()
 
 
+async def send_batch_report(
+    bot: Bot, redis, batch_id: str, chat_id: int, expected_count: int, is_timeout: bool = False
+) -> None:
+    results = await redis.hgetall(f"check_batch_results:{batch_id}")
+    if not results:
+        results_decoded = []
+    else:
+        results_decoded = [
+            res.decode("utf-8") if isinstance(res, bytes) else str(res)
+            for res in results.values()
+        ]
+
+    def sort_key(text):
+        try:
+            return int(text.split("#")[1].split()[0])
+        except Exception:
+            return 0
+
+    results_decoded.sort(key=sort_key)
+
+    valid_count = sum(1 for r in results_decoded if "Valid" in r)
+    limit_count = sum(1 for r in results_decoded if "Rate Limited (429)" in r)
+    invalid_count = len(results_decoded) - valid_count - limit_count
+
+    timeout_notice = ""
+    if is_timeout and len(results_decoded) < expected_count:
+        missing = expected_count - len(results_decoded)
+        timeout_notice = f"*Pengecekan Timeout* ({missing} key belum selesai)\n\n"
+
+    summary = (
+        f"*Laporan Pengecekan API Key{' (Selesai)' if not is_timeout else ''}*\n\n"
+        f"{timeout_notice}"
+        f"- Valid: {valid_count}\n"
+        f"- Limit: {limit_count}\n"
+        f"- Invalid/Gagal: {invalid_count}\n"
+        f"- Selesai: {len(results_decoded)}/{expected_count}\n\n"
+    )
+    full_text = summary + "\n".join(results_decoded)
+
+    if len(full_text) > 4000:
+        for i in range(0, len(full_text), 4000):
+            chunk = full_text[i : i + 4000]
+            await bot.send_message(chat_id=chat_id, text=chunk, parse_mode="Markdown")
+    else:
+        await bot.send_message(chat_id=chat_id, text=full_text, parse_mode="Markdown")
+
+    await redis.delete(f"check_batch_results:{batch_id}")
+    await redis.delete(f"check_batch_total:{batch_id}")
+
+
+async def process_check_single_key(
+    ctx: dict, admin_id: int, chat_id: int, api_key: str, key_label: str, batch_id: str
+) -> None:
+    await asyncio.sleep(random.uniform(1, 5))
+
+    bot: Bot = ctx["bot"]
+    triple_pool: TriplePool = ctx["triple_pool"]
+    redis = ctx["redis"]
+    job_id = ctx["job_id"]
+
+    triple_set = await triple_pool.acquire()
+    status_str = "Error Unknown"
+    should_retry = False
+    try:
+        headers = dict(triple_set.fingerprint)
+        headers["x-freepik-api-key"] = api_key
+        proxy = triple_set.proxy or None
+
+        async with httpx.AsyncClient(timeout=10, proxy=proxy) as client:
+            try:
+                resp = await client.head(
+                    "https://api.freepik.com/v1/resource", headers=headers
+                )
+                if resp.status_code == 403:
+                    await triple_pool.mark_burned(triple_set)
+                    status_str = "403 Forbidden"
+                    should_retry = True
+                elif resp.status_code == 429:
+                    await triple_pool.mark_burned(triple_set)
+                    status_str = "Rate Limited (429)"
+                    should_retry = True
+                elif resp.status_code in (200, 404, 400, 405):
+                    status_str = "Valid"
+                elif resp.status_code == 401:
+                    status_str = "Invalid (401)"
+                else:
+                    status_str = f"Status {resp.status_code}"
+            except httpx.RequestError:
+                await triple_pool.mark_burned(triple_set)
+                status_str = "Failed (Proxy/Network Error)"
+                should_retry = True
+
+    except Exception as e:
+        logger.error("Error checking key %s: %s", key_label, e)
+        status_str = "Failed (Crash)"
+    finally:
+        await triple_pool.release(triple_set)
+
+        if len(api_key) >= 8:
+            masked_key = f"{api_key[:4]}****{api_key[-4:]}"
+        else:
+            masked_key = "****"
+
+        result_str = f"{key_label} (`{masked_key}`): {status_str}"
+
+        try:
+            await redis.hset(
+                f"check_batch_results:{batch_id}", mapping={job_id: result_str}
+            )
+            await redis.expire(f"check_batch_results:{batch_id}", 600)
+
+            expected_count_bytes = await redis.get(f"check_batch_total:{batch_id}")
+            if expected_count_bytes:
+                expected_count = int(expected_count_bytes)
+                current_count = await redis.hlen(f"check_batch_results:{batch_id}")
+
+                if current_count == expected_count:
+                    is_first = await redis.setnx(
+                        f"check_batch_finished:{batch_id}", 1
+                    )
+                    if is_first:
+                        await redis.expire(f"check_batch_finished:{batch_id}", 600)
+                        await send_batch_report(
+                            bot, redis, batch_id, chat_id, expected_count, is_timeout=False
+                        )
+        except Exception as report_exc:
+            logger.error("Gagal mengirim laporan check keys: %s", report_exc)
+
+        if should_retry:
+            raise Exception("Retry proxy diblokir")
+
+
+async def process_check_batch_timeout(ctx: dict, batch_id: str, chat_id: int) -> None:
+    redis = ctx["redis"]
+    bot: Bot = ctx["bot"]
+
+    finished = await redis.get(f"check_batch_finished:{batch_id}")
+    if finished:
+        return
+
+    expected_count_bytes = await redis.get(f"check_batch_total:{batch_id}")
+    if not expected_count_bytes:
+        return
+
+    is_first = await redis.setnx(f"check_batch_finished:{batch_id}", 1)
+    if is_first:
+        await redis.expire(f"check_batch_finished:{batch_id}", 600)
+        expected_count = int(expected_count_bytes)
+        await send_batch_report(
+            bot, redis, batch_id, chat_id, expected_count, is_timeout=True
+        )
+
+
 async def process_generation(
     ctx: dict,
     user_id: int,
@@ -104,7 +258,7 @@ async def process_generation(
     if not status_msg_id:
         msg = await bot.send_message(
             chat_id=chat_id,
-            text="⏳ *Menyiapkan request AI...*",
+            text="*Menyiapkan request AI...*",
             parse_mode="Markdown",
         )
         status_msg_id = msg.message_id
@@ -129,7 +283,7 @@ async def process_generation(
                     chat_id=chat_id,
                     message_id=status_msg_id,
                     text=(
-                        f"❌ Error: {exc.status_code} - API menolak request untuk set saat ini. "
+                        f"Error: {exc.status_code} - API menolak request untuk set saat ini. "
                         "Silakan coba lagi beberapa saat lagi."
                     ),
                 )
@@ -147,7 +301,7 @@ async def process_generation(
 
 
 class WorkerSettings:
-    functions = [process_generation]
+    functions = [process_generation, process_check_single_key, process_check_batch_timeout]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(REDIS_URL)

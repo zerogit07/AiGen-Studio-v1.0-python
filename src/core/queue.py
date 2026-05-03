@@ -64,6 +64,46 @@ async def _get_redis_pool() -> ArqRedis:
         return _redis_pool
 
 
+async def init_key_check_batch(batch_id: str, expected_count: int) -> None:
+    redis = await _get_redis_pool()
+    await redis.set(f"check_batch_total:{batch_id}", expected_count, ex=600)
+    await redis.delete(f"check_batch_results:{batch_id}")
+    await redis.delete(f"check_batch_finished:{batch_id}")
+
+
+async def add_check_batch_timeout_job(batch_id: str, chat_id: int) -> str:
+    redis = await _get_redis_pool()
+    job = await redis.enqueue_job(
+        "process_check_batch_timeout",
+        batch_id=batch_id,
+        chat_id=chat_id,
+        _defer_by=300,
+    )
+    return job.job_id if job else ""
+
+
+async def add_check_single_key_job(
+    admin_id: int, chat_id: int, api_key: str, key_label: str, batch_id: str
+) -> str:
+    redis = await _get_redis_pool()
+    job = await redis.enqueue_job(
+        "process_check_single_key",
+        admin_id=admin_id,
+        chat_id=chat_id,
+        api_key=api_key,
+        key_label=key_label,
+        batch_id=batch_id,
+    )
+    if job is None:
+        raise RuntimeError("Gagal memasukkan job ke antrian")
+
+    logger.info(
+        "Check single key job queued: %s for admin %s (%s)",
+        job.job_id, admin_id, key_label,
+    )
+    return job.job_id
+
+
 async def add_job(
     user_id: int,
     chat_id: int,

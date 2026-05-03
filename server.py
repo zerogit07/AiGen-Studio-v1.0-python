@@ -14,12 +14,14 @@ import asyncio
 import logging
 import os
 import sys
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 
 load_dotenv(".env.local")
 load_dotenv()
 
+from fastapi import FastAPI
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -46,6 +48,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+bot_app: Application | None = None
+
 
 async def post_init(application: Application) -> None:
     """Load all data from Supabase after bot is initialized."""
@@ -62,17 +66,17 @@ async def post_init(application: Application) -> None:
     )
     logger.info("All data loaded successfully.")
 
-    # Clear and re-set bot commands
-    await application.bot.delete_my_commands()
-    await application.bot.set_my_commands([
-        ("start", "Menu Utama"),
-        ("admin", "Panel Admin"),
-    ])
+    try:
+        await application.bot.delete_my_commands(read_timeout=20, connect_timeout=20)
+        await application.bot.set_my_commands([
+            ("start", "Menu Utama"),
+            ("admin", "Panel Admin"),
+        ], read_timeout=20, connect_timeout=20)
+    except Exception as e:
+        logger.warning("Failed to set bot commands during startup: %s", e)
 
-    # Start background state cleaner
     asyncio.create_task(start_state_cleaner())
 
-    # Initial proxy check
     result = await proxy_manager.check_all_proxies()
     logger.info(
         "[Proxy] Startup check complete. Active: %d, Dead: %d",
@@ -83,43 +87,69 @@ async def post_init(application: Application) -> None:
     logger.info("Bot started using Polling mode (AiGen Studio Python).")
 
 
-async def periodic_proxy_check(application: Application) -> None:
-    """Check proxies every 30 minutes."""
-    while True:
-        await asyncio.sleep(30 * 60)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global bot_app
+
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not bot_token:
+        logger.error("TELEGRAM_BOT_TOKEN is not set! Telegram bot will NOT start.")
+    else:
+        bot_app = (
+            Application.builder()
+            .token(bot_token)
+            .connect_timeout(20.0)
+            .read_timeout(20.0)
+            .write_timeout(20.0)
+            .pool_timeout(20.0)
+            .get_updates_read_timeout(30.0)
+            .post_init(post_init)
+            .build()
+        )
+
+        bot_app.add_handler(CommandHandler("start", start_command))
+        bot_app.add_handler(CommandHandler("admin", admin_command))
+        bot_app.add_handler(CallbackQueryHandler(callback_handler))
+        bot_app.add_handler(MessageHandler(filters.PHOTO, photo_handler))
+        bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+
+        logger.info("Initializing bot application...")
+        await bot_app.initialize()
+        await bot_app.start()
         try:
-            result = await proxy_manager.check_all_proxies()
-            logger.info(
-                "[Proxy] Background check. Active: %d, Dead: %d",
-                result["active_count"],
-                result["dead_count"],
-            )
-        except Exception as exc:
-            logger.error("[Proxy] Background check failed: %s", exc)
+            await bot_app.updater.start_polling(drop_pending_updates=True)
+            logger.info("Bot is polling.")
+        except Exception as e:
+            logger.warning("Polling already running or error: %s", e)
+
+    yield
+
+    if bot_app:
+        logger.info("Shutting down bot application...")
+        if bot_app.updater:
+            await bot_app.updater.stop()
+        await bot_app.stop()
+        await bot_app.shutdown()
+
+
+app = FastAPI(lifespan=lifespan, title="AiGen Studio API")
+
+
+@app.get("/")
+async def root():
+    return {"message": "AiGen Studio Bot Service is running."}
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 
 def main() -> None:
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not bot_token:
-        logger.error("TELEGRAM_BOT_TOKEN is not set!")
-        sys.exit(1)
-
-    application = (
-        Application.builder()
-        .token(bot_token)
-        .post_init(post_init)
-        .build()
-    )
-
-    # Register handlers
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("admin", admin_command))
-    application.add_handler(CallbackQueryHandler(callback_handler))
-    application.add_handler(MessageHandler(filters.PHOTO, photo_handler))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-
-    # Start polling
-    application.run_polling(drop_pending_updates=True)
+    import uvicorn
+    port = int(os.environ.get("PORT", 3000))
+    logger.info("Starting FastAPI server on port %d...", port)
+    uvicorn.run("server:app", host="0.0.0.0", port=port, log_level="info")
 
 
 if __name__ == "__main__":
