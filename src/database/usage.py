@@ -1,120 +1,87 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from src.database.client import supabase
+from src.database.db import get_db
 
 logger = logging.getLogger(__name__)
 
 
+@dataclass
 class UsageData:
-    def __init__(
-        self,
-        video_today: int = 0,
-        last_reset: str = "",
-        video_month: int = 0,
-        last_month_reset: str = "",
-    ) -> None:
-        self.video_today = video_today
-        self.last_reset = last_reset
-        self.video_month = video_month
-        self.last_month_reset = last_month_reset
-
-    def to_dict(self) -> dict:
-        return {
-            "video_today": self.video_today,
-            "last_reset": self.last_reset,
-            "video_month": self.video_month,
-            "last_month_reset": self.last_month_reset,
-        }
+    video_today: int = 0
+    last_reset: str = ""
+    video_month: int = 0
+    last_month_reset: str = ""
 
 
 class UsageManager:
     def __init__(self) -> None:
-        self._usage: dict[str, UsageData] = {}
+        self._cache: dict[str, UsageData] = {}
 
-    async def load_usage(self) -> None:
-        if not supabase:
-            return
+    async def get_usage(self, user_id: int | str) -> UsageData:
+        uid = str(user_id)
+        now = datetime.now(timezone.utc)
+        today = now.strftime("%Y-%m-%d")
+        month = now.strftime("%Y-%m")
+
+        db = await get_db()
         try:
-            resp = await supabase.table("usage").select("*").execute()
-            for item in resp.data or []:
-                self._usage[str(item["user_id"])] = UsageData(
-                    video_today=item.get("video_today", 0),
-                    last_reset=item.get("last_reset", ""),
-                    video_month=item.get("video_month", 0),
-                    last_month_reset=item.get("last_month_reset", ""),
-                )
-            logger.info("Loaded %d usage records from Supabase.", len(self._usage))
-        except Exception as exc:
-            logger.error("Error loading usage from Supabase: %s", exc)
+            async with db.execute("SELECT * FROM usage WHERE user_id=?", (uid,)) as cursor:
+                row = await cursor.fetchone()
+        except Exception:
+            row = None
 
-    async def get_usage(self, user_id: int) -> UsageData:
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        this_month = today[:7]  # YYYY-MM
-        id_str = str(user_id)
-        data = self._usage.get(id_str)
-
-        if not data:
-            data = UsageData(
-                video_today=0,
-                last_reset=today,
-                video_month=0,
-                last_month_reset=this_month,
+        if row:
+            usage = UsageData(
+                video_today=row["video_today"] or 0,
+                last_reset=row["last_reset"] or "",
+                video_month=row["video_month"] or 0,
+                last_month_reset=row["last_month_reset"] or "",
             )
-            self._usage[id_str] = data
-            if supabase:
-                try:
-                    await supabase.table("usage").upsert(
-                        {"user_id": user_id, **data.to_dict()}
-                    ).execute()
-                except Exception as exc:
-                    logger.error("Error upserting usage: %s %s", user_id, exc)
         else:
-            changed = False
-            if data.last_reset != today:
-                data.video_today = 0
-                data.last_reset = today
-                changed = True
-            if data.last_month_reset != this_month:
-                data.video_month = 0
-                data.last_month_reset = this_month
-                changed = True
-            if changed and supabase:
-                try:
-                    await supabase.table("usage").upsert(
-                        {"user_id": user_id, **data.to_dict()}
-                    ).execute()
-                except Exception as exc:
-                    logger.error("Error upserting usage: %s %s", user_id, exc)
-        return data
+            usage = UsageData()
+            await db.execute(
+                "INSERT OR REPLACE INTO usage (user_id, video_today, last_reset, video_month, last_month_reset) VALUES (?, 0, ?, 0, ?)",
+                (uid, today, month),
+            )
+            await db.commit()
 
-    async def increment_usage(self, user_id: int) -> None:
-        data = await self.get_usage(user_id)
-        data.video_today += 1
-        data.video_month += 1
-        if supabase:
-            try:
-                await supabase.table("usage").upsert(
-                    {"user_id": user_id, **data.to_dict()}
-                ).execute()
-            except Exception as exc:
-                logger.error("Error incrementing usage: %s %s", user_id, exc)
+        if usage.last_reset != today:
+            usage.video_today = 0
+            usage.last_reset = today
+            await db.execute("UPDATE usage SET video_today=0, last_reset=? WHERE user_id=?", (today, uid))
+            await db.commit()
+
+        if usage.last_month_reset != month:
+            usage.video_month = 0
+            usage.last_month_reset = month
+            await db.execute("UPDATE usage SET video_month=0, last_month_reset=? WHERE user_id=?", (month, uid))
+            await db.commit()
+
+        self._cache[uid] = usage
+        return usage
+
+    async def increment_usage(self, user_id: int | str) -> None:
+        uid = str(user_id)
+        usage = await self.get_usage(uid)
+        usage.video_today += 1
+        usage.video_month += 1
+
+        db = await get_db()
+        await db.execute(
+            "UPDATE usage SET video_today=?, video_month=? WHERE user_id=?",
+            (usage.video_today, usage.video_month, uid),
+        )
+        await db.commit()
 
     def get_total_usage_today(self) -> int:
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        return sum(
-            d.video_today for d in self._usage.values() if d.last_reset == today
-        )
+        return sum(u.video_today for u in self._cache.values())
 
     def get_total_usage_month(self) -> int:
-        this_month = datetime.now(timezone.utc).strftime("%Y-%m")
-        return sum(
-            d.video_month
-            for d in self._usage.values()
-            if d.last_month_reset == this_month
-        )
+        return sum(u.video_month for u in self._cache.values())
 
 
 usage_manager = UsageManager()

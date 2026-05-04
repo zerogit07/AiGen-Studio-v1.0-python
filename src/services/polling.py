@@ -1,193 +1,88 @@
+"""Poll generation status from Freepik API."""
 from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
+from aiogram import Bot
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from src.core.types import TripleSet
-from src.database.client import supabase
-from src.database.members import member_manager
 from src.database.usage import usage_manager
-from src.services.request_engine import RequestEngineHTTPError, request_engine
+from src.services.request_engine import request_engine
+from src.services.stats import log_activity
 
 logger = logging.getLogger(__name__)
 
-used_action_buttons: set[str] = set()
-
-
-def mark_buttons_used(msg_id: int, chat_id: int) -> None:
-    used_action_buttons.add(f"{chat_id}:{msg_id}")
+POLL_INTERVAL = 10
+MAX_RETRIES = 180
 
 
 async def watch_generation(
-    bot,
+    bot: Bot,
     chat_id: int,
     user_id: int,
-    job_id: str,
+    task_id: str,
     status_path: str,
-    status_msg_id: int,
-    prompt: str,
+    model_id: str,
     used_key: str,
-    original_model_id: str,
-    triple_set: TripleSet | None = None,
-) -> None:
-    """Poll the Freepik API for job completion."""
-    retry_count = 0
-    max_retries = 180  # 30 minutes (10s * 180)
-    finish_again_callback = f"finish_again:{original_model_id}"
-    action_key = f"{chat_id}:{status_msg_id}"
+    prompt: str = "",
+    proxy: str = "",
+    status_msg_id: int | None = None,
+) -> dict[str, Any]:
+    endpoint = f"{status_path}/{task_id}"
 
-    while retry_count < max_retries:
-        retry_count += 1
-        await asyncio.sleep(10)
+    for attempt in range(MAX_RETRIES):
+        await asyncio.sleep(POLL_INTERVAL)
+        result = await request_engine("GET", endpoint, api_key=used_key, proxy=proxy)
 
-        try:
-            if status_path == "jobs":
-                url = f"https://api.freepik.com/v1/ai/jobs/{job_id}"
-            else:
-                url = f"https://api.freepik.com/v1/ai/{status_path}/{job_id}"
+        if "error" in result:
+            logger.warning("Polling error attempt %d: %s", attempt + 1, result.get("error"))
+            continue
 
-            logger.info("Polling: %s", url)
+        data = result.get("data", {})
+        inner = data.get("data", data) if isinstance(data, dict) else {}
+        status = str(inner.get("status", "")).lower()
 
-            result = await request_engine(
-                method="GET",
-                url=url,
-                force_api_key=None if triple_set else used_key,
-                triple_set=triple_set,
-            )
+        if status in ("completed", "done", "success"):
+            video_url = inner.get("video_url") or inner.get("output", {}).get("video_url", "")
+            image_url = inner.get("image_url") or inner.get("output", {}).get("image_url", "")
+            result_url = video_url or image_url
 
-            job_data = result["data"].get("data", result["data"])
-            status = (job_data.get("status") or "").lower()
-
-            in_progress_statuses = {
-                "in_progress", "processing", "queued", "starting",
-                "pending", "queued_waiting", "init", "waiting",
-            }
-
-            output = job_data.get("output", {})
-            result_url = None
-            if isinstance(output, dict):
-                result_url = output.get("video") or output.get("image") or output.get("url")
-            elif isinstance(output, list) and output:
-                first = output[0]
-                result_url = first.get("url") if isinstance(first, dict) else first
-
-            if not result_url:
-                result_data = job_data.get("result", {})
-                if isinstance(result_data, dict):
-                    result_url = result_data.get("video_url") or result_data.get("image_url")
-
-            if not result_url:
-                result_url = job_data.get("video_url") or job_data.get("image_url")
-
-            if not result_url:
-                generated = job_data.get("generated", [])
-                if generated:
-                    result_url = generated[0] if isinstance(generated[0], str) else None
-
-            logger.info("Job %s [%s] Status: %s", job_id, original_model_id, status)
-
-            if status in ("completed", "done", "success") and result_url:
-                await member_manager.end_process(user_id)
+            if result_url:
                 await usage_manager.increment_usage(user_id)
-                if supabase:
-                    try:
-                        await supabase.table("jobs").update({"status": "completed"}).eq(
-                            "job_id", job_id
-                        ).execute()
-                    except Exception:
-                        pass
+                log_activity(user_id, model_id, prompt)
 
-                is_image_model = "nano_" in original_model_id
-                keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔄 Gunakan Lagi", callback_data=finish_again_callback)],
-                    [InlineKeyboardButton("🏠 Ganti Model", callback_data="finish_change")],
+                finish_kb = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="\U0001f504 Generate Lagi", callback_data=f"finish_again:{model_id}"),
+                        InlineKeyboardButton(text="\U0001f4c4 Ganti Model", callback_data="change_model"),
+                    ]
                 ])
 
-                show_buttons = action_key not in used_action_buttons
-                reply_markup = keyboard if show_buttons else None
-
                 try:
-                    await bot.delete_message(chat_id=chat_id, message_id=status_msg_id)
-                except Exception:
-                    pass
+                    if video_url:
+                        await bot.send_video(chat_id=chat_id, video=video_url, caption=f"\u2705 Selesai!\nModel: {model_id}", reply_markup=finish_kb)
+                    elif image_url:
+                        await bot.send_photo(chat_id=chat_id, photo=image_url, caption=f"\u2705 Selesai!\nModel: {model_id}", reply_markup=finish_kb)
+                except Exception as exc:
+                    logger.error("Error sending result: %s", exc)
+                    await bot.send_message(chat_id=chat_id, text=f"\u2705 Selesai!\n\nLink: {result_url}", reply_markup=finish_kb)
 
-                try:
-                    if is_image_model:
-                        await bot.send_photo(
-                            chat_id=chat_id,
-                            photo=result_url,
-                            caption=f"*GENERATE BERHASIL!*\n\nPrompt: {prompt}",
-                            parse_mode="Markdown",
-                            reply_markup=reply_markup,
-                        )
-                    else:
-                        await bot.send_video(
-                            chat_id=chat_id,
-                            video=result_url,
-                            caption=f"*GENERATE BERHASIL!*\n\nPrompt: {prompt}",
-                            parse_mode="Markdown",
-                            reply_markup=reply_markup,
-                        )
-                except Exception:
-                    pass
-
-                used_action_buttons.discard(action_key)
-                return
-
-            if status in ("failed", "error"):
-                await member_manager.end_process(user_id)
-                if supabase:
+                if status_msg_id:
                     try:
-                        await supabase.table("jobs").update({"status": "failed"}).eq(
-                            "job_id", job_id
-                        ).execute()
+                        await bot.delete_message(chat_id=chat_id, message_id=status_msg_id)
                     except Exception:
                         pass
 
-                status_code = job_data.get("code", "500")
-                error_detail = job_data.get("message", "Generate gagal")
-                logger.error("Job %s failed: %s - %s", job_id, status_code, error_detail)
-                try:
-                    await bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=status_msg_id,
-                        text="Generate gagal. Silakan coba lagi.",
-                    )
-                except Exception:
-                    pass
-                used_action_buttons.discard(action_key)
-                return
+                return {"status": "completed", "url": result_url}
 
-            if status in in_progress_statuses:
-                continue
+            return {"status": "completed_no_url"}
 
-        except RequestEngineHTTPError as exc:
-            if exc.status_code in (403, 429):
-                raise
-            logger.error("Polling HTTP error for job %s: %s", job_id, exc)
-        except Exception as exc:
-            logger.error("Polling error for job %s: %s", job_id, exc)
+        elif status in ("failed", "error"):
+            error_msg = inner.get("error", "Unknown error")
+            await bot.send_message(chat_id=chat_id, text=f"\u274c Gagal!\nError: {error_msg}")
+            return {"status": "failed", "error": error_msg}
 
-    await member_manager.end_process(user_id)
-    if supabase:
-        try:
-            await supabase.table("jobs").update({"status": "failed"}).eq(
-                "job_id", job_id
-            ).execute()
-        except Exception:
-            pass
-    try:
-        await bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=status_msg_id,
-            text="Timeout. Generate tidak selesai dalam 30 menit. Silakan coba lagi.",
-        )
-    except Exception:
-        pass
-    used_action_buttons.discard(action_key)
-
-
-poll_job_status = watch_generation
+    await bot.send_message(chat_id=chat_id, text="\u23f0 Timeout: proses melebihi batas waktu (30 menit).")
+    return {"status": "timeout"}

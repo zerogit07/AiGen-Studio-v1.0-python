@@ -4,10 +4,8 @@ import logging
 import random
 import time
 
-import httpx
-
 from src.core.types import ApiKey
-from src.database.client import supabase
+from src.database.db import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -18,21 +16,17 @@ class ApiKeyManager:
         self._current_index: int = 0
 
     async def load_keys(self) -> None:
-        if not supabase:
-            return
+        db = await get_db()
         try:
-            resp = await supabase.table("api_keys").select("*").execute()
+            async with db.execute("SELECT * FROM api_keys") as cursor:
+                rows = await cursor.fetchall()
             self._keys = [
-                ApiKey(
-                    key=item["key"],
-                    active=item.get("active", True),
-                    cooldown_until=int(item.get("cooldown_until", 0)),
-                )
-                for item in (resp.data or [])
+                ApiKey(key=row["key"], active=bool(row["active"]), cooldown_until=row["cooldown_until"] or 0)
+                for row in rows
             ]
-            logger.info("Loaded %d Freepik API keys from Supabase.", len(self._keys))
+            logger.info("Loaded %d API keys.", len(self._keys))
         except Exception as exc:
-            logger.error("Error loading keys from Supabase: %s", exc)
+            logger.error("Error loading keys: %s", exc)
 
     def get_all_keys(self) -> list[ApiKey]:
         return self._keys
@@ -64,64 +58,42 @@ class ApiKeyManager:
     async def set_cooldown(self, key: str, custom_duration_seconds: int | None = None) -> None:
         ak = next((k for k in self._keys if k.key == key), None)
         if ak:
-            duration = (
-                custom_duration_seconds * 1000
-                if custom_duration_seconds
-                else random.randint(60, 120) * 1000
-            )
+            duration = (custom_duration_seconds * 1000 if custom_duration_seconds else random.randint(60, 120) * 1000)
             ak.cooldown_until = int(time.time() * 1000) + duration
-            logger.info("[Cooldown] Key %s... set for %ds", key[:8], duration // 1000)
-            if supabase:
-                try:
-                    await supabase.table("api_keys").update(
-                        {"cooldown_until": ak.cooldown_until}
-                    ).eq("key", key).execute()
-                except Exception:
-                    pass
+            db = await get_db()
+            await db.execute("UPDATE api_keys SET cooldown_until=? WHERE key=?", (ak.cooldown_until, key))
+            await db.commit()
 
     async def mark_key_dead(self, key: str) -> None:
         ak = next((k for k in self._keys if k.key == key), None)
         if ak:
             ak.active = False
-            if supabase:
-                try:
-                    await supabase.table("api_keys").update({"active": False}).eq(
-                        "key", key
-                    ).execute()
-                except Exception as exc:
-                    logger.error("Error marking key dead in Supabase: %s %s", key, exc)
+            db = await get_db()
+            await db.execute("UPDATE api_keys SET active=0 WHERE key=?", (key,))
+            await db.commit()
 
     async def add_key(self, key: str) -> None:
         if not any(ak.key == key for ak in self._keys):
-            new_key = ApiKey(key=key, active=True, cooldown_until=0)
-            self._keys.append(new_key)
-            if supabase:
-                try:
-                    await supabase.table("api_keys").upsert(
-                        {"key": key, "active": True, "cooldown_until": 0}
-                    ).execute()
-                except Exception as exc:
-                    logger.error("Error adding key to Supabase: %s %s", key, exc)
+            self._keys.append(ApiKey(key=key, active=True, cooldown_until=0))
+            db = await get_db()
+            await db.execute(
+                "INSERT OR REPLACE INTO api_keys (key, active, cooldown_until) VALUES (?, 1, 0)", (key,)
+            )
+            await db.commit()
 
     async def remove_key(self, key: str) -> None:
         self._keys = [ak for ak in self._keys if ak.key != key]
-        if supabase:
-            try:
-                await supabase.table("api_keys").delete().eq("key", key).execute()
-            except Exception as exc:
-                logger.error("Error removing key from Supabase: %s %s", key, exc)
+        db = await get_db()
+        await db.execute("DELETE FROM api_keys WHERE key=?", (key,))
+        await db.commit()
 
     async def toggle_key(self, key: str) -> bool:
         ak = next((k for k in self._keys if k.key == key), None)
         if ak:
             ak.active = not ak.active
-            if supabase:
-                try:
-                    await supabase.table("api_keys").update({"active": ak.active}).eq(
-                        "key", key
-                    ).execute()
-                except Exception as exc:
-                    logger.error("Error toggling key in Supabase: %s %s", key, exc)
+            db = await get_db()
+            await db.execute("UPDATE api_keys SET active=? WHERE key=?", (int(ak.active), key))
+            await db.commit()
             return True
         return False
 
@@ -129,80 +101,22 @@ class ApiKeyManager:
         for k in self._keys:
             k.active = True
             k.cooldown_until = 0
-        if supabase:
-            try:
-                await supabase.table("api_keys").update(
-                    {"active": True, "cooldown_until": 0}
-                ).neq("key", "").execute()
-            except Exception as exc:
-                logger.error("Error enabling all keys: %s", exc)
+        db = await get_db()
+        await db.execute("UPDATE api_keys SET active=1, cooldown_until=0")
+        await db.commit()
 
     async def disable_all(self) -> None:
         for k in self._keys:
             k.active = False
-        if supabase:
-            try:
-                await supabase.table("api_keys").update({"active": False}).neq("key", "").execute()
-            except Exception as exc:
-                logger.error("Error disabling all keys: %s", exc)
+        db = await get_db()
+        await db.execute("UPDATE api_keys SET active=0")
+        await db.commit()
 
     async def delete_all(self) -> None:
-        self._keys = []
-        if supabase:
-            try:
-                await supabase.table("api_keys").delete().neq("key", "").execute()
-            except Exception as exc:
-                logger.error("Error deleting all keys: %s", exc)
-
-    async def test_all_keys(self) -> dict[str, int]:
-        valid = 0
-        limit = 0
-        invalid = 0
-        total = len(self._keys)
-
-        if total == 0:
-            return {"valid": valid, "limit": limit, "invalid": invalid, "total": total}
-
-        async with httpx.AsyncClient(timeout=10) as client:
-            for k in self._keys:
-                try:
-                    resp = await client.get(
-                        "https://api.freepik.com/v1/ai/text-to-image/nano-banana-pro",
-                        headers={"x-freepik-api-key": k.key},
-                    )
-                    if resp.status_code in (404, 400, 405):
-                        valid += 1
-                        if not k.active or k.cooldown_until > int(time.time() * 1000):
-                            k.active = True
-                            k.cooldown_until = 0
-                            if supabase:
-                                try:
-                                    await supabase.table("api_keys").update(
-                                        {"active": True, "cooldown_until": 0}
-                                    ).eq("key", k.key).execute()
-                                except Exception:
-                                    pass
-                    elif resp.status_code == 200:
-                        valid += 1
-                        if not k.active:
-                            k.active = True
-                            k.cooldown_until = 0
-                            if supabase:
-                                try:
-                                    await supabase.table("api_keys").update(
-                                        {"active": True, "cooldown_until": 0}
-                                    ).eq("key", k.key).execute()
-                                except Exception:
-                                    pass
-                    elif resp.status_code == 429:
-                        limit += 1
-                    else:
-                        invalid += 1
-                        await self.mark_key_dead(k.key)
-                except Exception:
-                    invalid += 1
-
-        return {"valid": valid, "limit": limit, "invalid": invalid, "total": total}
+        self._keys.clear()
+        db = await get_db()
+        await db.execute("DELETE FROM api_keys")
+        await db.commit()
 
 
 api_key_manager = ApiKeyManager()

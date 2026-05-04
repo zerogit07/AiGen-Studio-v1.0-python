@@ -1,167 +1,98 @@
-"""Freepik API Router — dispatches to per-model handlers in src/services/models/"""
+"""Freepik AI API router — dispatches generation requests to per-model handlers."""
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
-from src.core.types import TripleSet
+from src.core.constants import MODEL_CONFIG
 from src.services.request_engine import request_engine
-from src.services.models import (
-    kling_v3_pro,
-    kling_v3_std,
-    kling_v3_omni_pro,
-    kling_v3_omni_std,
-    kling_v3_motion_pro,
-    kling_v3_motion_std,
-    kling_2_6_pro,
-    kling_2_6_motion_pro,
-    kling_2_6_motion_std,
-    kling_2_5_turbo,
-    kling_2_1_pro,
-    kling_2_1_std,
-    kling_o1_pro,
-    kling_o1_std,
-    veo_3_1,
-    veo_3_1_fast,
-    nano_banana_pro,
-    nano_banana_flash,
-)
 
 logger = logging.getLogger(__name__)
-
-BASE_URL = "https://api.freepik.com/v1/ai"
 
 
 @dataclass
 class GenerateParams:
-    model_id: str
-    prompt: str
-    aspect_ratio: str = "portrait_9_16"
-    resolution: str = "720"
-    duration: str = "5"
-    generate_audio: bool = True
+    prompt: str = ""
+    model_id: str = ""
+    duration: Optional[str] = None
+    aspect_ratio: Optional[str] = None
+    orientation: Optional[str] = None
+    resolution: Optional[str] = None
     image_url: Optional[str] = None
-    video_url: Optional[str] = None
+    image_base64: Optional[str] = None
     image_url_last: Optional[str] = None
     image_refs: list[str] = field(default_factory=list)
-    image_base64: str = ""
-    mode: Optional[str] = None
-    orientation: Optional[str] = None
+    generate_audio: bool = True
     shots: list[dict] = field(default_factory=list)
     kling3_mode: Optional[str] = None
     camera_config: Optional[dict] = None
 
 
-async def _send_request(
-    endpoint: str,
-    status_path: str,
-    payload: dict,
-    triple_set: TripleSet | None = None,
-) -> dict:
-    url = f"{BASE_URL}/{endpoint}"
-    try:
-        result = await request_engine(
-            method="POST",
-            url=url,
-            json_data=payload,
-            triple_set=triple_set,
-        )
-        return {
-            "data": result["data"],
-            "used_key": result["used_key"],
-            "final_endpoint": endpoint,
-            "final_status_path": status_path,
-            "error": None,
-        }
-    except RuntimeError as exc:
-        error_msg = str(exc)
-        if error_msg.startswith("400"):
-            return {
-                "error": error_msg,
-                "data": None,
-                "used_key": "",
-                "final_endpoint": endpoint,
-                "final_status_path": status_path,
-            }
-        raise
-
-
-# ─── Model Router ─────────────────────────────────────────
-
-MODEL_HANDLERS = {
-    # Kling V3
-    "kling_v3": kling_v3_pro,
-    "kling_v3_pro": kling_v3_pro,
-    "kling_v3_std": kling_v3_std,
-    # Kling V3 Omni
-    "kling_v3_omni": kling_v3_omni_pro,
-    "kling_v3_omni_pro": kling_v3_omni_pro,
-    "kling_v3_omni_std": kling_v3_omni_std,
-    # Kling V3 Motion Control
-    "kling_v3_motion": kling_v3_motion_pro,
-    "kling_v3_motion_pro": kling_v3_motion_pro,
-    "kling_v3_motion_std": kling_v3_motion_std,
-    # Kling 2.6
-    "kling_2_6_pro": kling_2_6_pro,
-    "kling_2_6_motion": kling_2_6_motion_pro,
-    "kling_2_6_motion_pro": kling_2_6_motion_pro,
-    "kling_2_6_motion_std": kling_2_6_motion_std,
-    # Kling 2.5
-    "kling_2_5_turbo": kling_2_5_turbo,
-    # Kling 2.1
-    "kling_2_1": kling_2_1_std,
-    "kling_2_1_pro": kling_2_1_pro,
-    "kling_2_1_std": kling_2_1_std,
-    # Kling O1
-    "kling_o1": kling_o1_pro,
-    "kling_o1_pro": kling_o1_pro,
-    "kling_o1_std": kling_o1_std,
-    # Veo 3.1
-    "veo_3_1": veo_3_1,
-    "veo_3_1_standard": veo_3_1,
-    "veo_3_1_fast": veo_3_1_fast,
-    "veo_3_1_ingredient": veo_3_1,
-    # Nano Banana
-    "nano_banana_pro": nano_banana_pro,
-    "nano_banana_flash": nano_banana_flash,
-}
-
-
-async def submit_video_generation(
+async def submit_generation(
     params: GenerateParams,
-    triple_set: TripleSet | None = None,
-) -> dict:
-    """POST - Create task (generate video/image)."""
-    model_id = params.model_id
-    module = MODEL_HANDLERS.get(model_id)
-    if not module:
-        raise RuntimeError(f"Model handler not found for: {model_id}")
+    api_key: str = "",
+    proxy: str = "",
+) -> dict[str, Any]:
+    config = MODEL_CONFIG.get(params.model_id)
+    if not config:
+        return {"error": f"Model '{params.model_id}' tidak ditemukan."}
 
-    logger.info("[%s] Submitting via %s", model_id, module.__name__)
+    payload: dict[str, Any] = {"prompt": params.prompt}
 
-    async def bound_send_request(endpoint: str, status_path: str, payload: dict) -> dict:
-        return await _send_request(
-            endpoint=endpoint,
-            status_path=status_path,
-            payload=payload,
-            triple_set=triple_set,
-        )
+    if config.needs_duration and params.duration:
+        payload["duration"] = str(int(params.duration))
 
-    return await module.create_task(params, bound_send_request)
+    if config.needs_aspect_ratio and params.aspect_ratio:
+        ar_map = {
+            "portrait_9_16": "9:16",
+            "landscape_16_9": "16:9",
+            "square_1_1": "1:1",
+        }
+        payload["aspect_ratio"] = ar_map.get(params.aspect_ratio, params.aspect_ratio)
 
+    if config.needs_orientation and params.orientation:
+        payload["orientation"] = params.orientation
 
-async def get_task_status(model_id: str, task_id: str, api_key: str) -> dict:
-    """GET - Get single task status by task_id."""
-    module = MODEL_HANDLERS.get(model_id)
-    if not module:
-        raise RuntimeError(f"Model handler not found for: {model_id}")
-    return await module.get_task(task_id, api_key)
+    if params.resolution:
+        payload["resolution"] = params.resolution
 
+    if params.image_url:
+        payload["start_image_url"] = params.image_url
+    if params.image_url_last:
+        payload["end_image_url"] = params.image_url_last
+    if params.image_refs:
+        payload["elements"] = [{"reference_image_urls": params.image_refs[:3]}]
+    if params.generate_audio:
+        payload["generate_audio"] = True
 
-async def list_tasks(model_id: str, api_key: str) -> dict:
-    """GET - List all tasks for a model."""
-    module = MODEL_HANDLERS.get(model_id)
-    if not module:
-        raise RuntimeError(f"Model handler not found for: {model_id}")
-    return await module.list_tasks(api_key)
+    if params.shots and params.kling3_mode in ("multi_intelligence", "multi_customize"):
+        payload["multi_prompt"] = [
+            {"prompt": s.get("prompt", ""), "duration": str(s.get("duration", 5))}
+            for s in params.shots
+        ]
+        payload["multi_shot"] = True
+        if params.kling3_mode == "multi_intelligence":
+            payload["shot_type"] = "intelligent"
+        else:
+            payload["shot_type"] = "customize"
+
+    if params.camera_config:
+        payload["camera_control"] = params.camera_config
+
+    result = await request_engine("POST", config.endpoint, payload=payload, api_key=api_key or None, proxy=proxy)
+
+    if "error" in result:
+        return result
+
+    data = result.get("data", {})
+    task_id = ""
+    if isinstance(data, dict):
+        task_id = str(data.get("data", {}).get("task_id", "") or data.get("task_id", ""))
+
+    return {
+        "data": data,
+        "used_key": result.get("used_key", api_key),
+        "final_status_path": config.status_path,
+        "task_id": task_id,
+    }
