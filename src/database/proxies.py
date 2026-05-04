@@ -4,10 +4,10 @@ import asyncio
 import logging
 import time
 
-import httpx
+import aiohttp
 
 from src.core.types import ProxyEntry
-from src.database.client import supabase
+from src.database.db import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -18,53 +18,38 @@ class ProxyManager:
         self._current_index: int = 0
 
     async def load_proxies(self) -> None:
-        if not supabase:
-            return
+        db = await get_db()
         try:
-            resp = await supabase.table("proxies").select("*").execute()
+            async with db.execute("SELECT * FROM proxies") as cursor:
+                rows = await cursor.fetchall()
             self._proxies = [
-                ProxyEntry(
-                    proxy=item["proxy"],
-                    active=item.get("active", True),
-                    cooldown_until=int(item.get("cooldown_until", 0)),
-                )
-                for item in (resp.data or [])
+                ProxyEntry(proxy=row["proxy"], active=bool(row["active"]), cooldown_until=row["cooldown_until"] or 0)
+                for row in rows
             ]
-            logger.info("Loaded %d proxies from Supabase.", len(self._proxies))
+            logger.info("Loaded %d proxies.", len(self._proxies))
         except Exception as exc:
             logger.error("Error loading proxies: %s", exc)
 
     async def add_proxy(self, proxy: str) -> None:
         if not any(p.proxy == proxy for p in self._proxies):
-            new_proxy = ProxyEntry(proxy=proxy, active=True, cooldown_until=0)
-            self._proxies.append(new_proxy)
-            if supabase:
-                try:
-                    await supabase.table("proxies").upsert(
-                        {"proxy": proxy, "active": True, "cooldown_until": 0}
-                    ).execute()
-                except Exception as exc:
-                    logger.error("Error adding proxy: %s %s", proxy, exc)
+            self._proxies.append(ProxyEntry(proxy=proxy, active=True, cooldown_until=0))
+            db = await get_db()
+            await db.execute("INSERT OR REPLACE INTO proxies (proxy, active, cooldown_until) VALUES (?, 1, 0)", (proxy,))
+            await db.commit()
 
     async def remove_proxy(self, proxy: str) -> None:
         self._proxies = [p for p in self._proxies if p.proxy != proxy]
-        if supabase:
-            try:
-                await supabase.table("proxies").delete().eq("proxy", proxy).execute()
-            except Exception as exc:
-                logger.error("Error removing proxy: %s %s", proxy, exc)
+        db = await get_db()
+        await db.execute("DELETE FROM proxies WHERE proxy=?", (proxy,))
+        await db.commit()
 
     async def toggle_proxy(self, proxy: str) -> bool:
         entry = next((p for p in self._proxies if p.proxy == proxy), None)
         if entry:
             entry.active = not entry.active
-            if supabase:
-                try:
-                    await supabase.table("proxies").update({"active": entry.active}).eq(
-                        "proxy", proxy
-                    ).execute()
-                except Exception as exc:
-                    logger.error("Error toggling proxy: %s %s", proxy, exc)
+            db = await get_db()
+            await db.execute("UPDATE proxies SET active=? WHERE proxy=?", (int(entry.active), proxy))
+            await db.commit()
             return True
         return False
 
@@ -72,68 +57,46 @@ class ProxyManager:
         for p in self._proxies:
             p.active = True
             p.cooldown_until = 0
-        if supabase:
-            try:
-                await supabase.table("proxies").update(
-                    {"active": True, "cooldown_until": 0}
-                ).neq("proxy", "").execute()
-            except Exception:
-                pass
+        db = await get_db()
+        await db.execute("UPDATE proxies SET active=1, cooldown_until=0")
+        await db.commit()
 
     async def disable_all(self) -> None:
         for p in self._proxies:
             p.active = False
-        if supabase:
-            try:
-                await supabase.table("proxies").update({"active": False}).neq(
-                    "proxy", ""
-                ).execute()
-            except Exception:
-                pass
+        db = await get_db()
+        await db.execute("UPDATE proxies SET active=0")
+        await db.commit()
 
     async def delete_all(self) -> None:
-        self._proxies = []
-        if supabase:
-            try:
-                await supabase.table("proxies").delete().neq("proxy", "").execute()
-            except Exception:
-                pass
+        self._proxies.clear()
+        db = await get_db()
+        await db.execute("DELETE FROM proxies")
+        await db.commit()
 
     async def check_all_proxies(self) -> dict[str, int]:
         active_count = 0
         dead_count = 0
 
-        async def _check_single(p: ProxyEntry) -> bool:
+        async def _check(p: ProxyEntry) -> bool:
             try:
-                async with httpx.AsyncClient(proxy=p.proxy, timeout=5) as client:
-                    await client.get("http://www.google.com")
-                return True
+                async with aiohttp.ClientSession() as session:
+                    async with session.get("http://www.google.com", proxy=p.proxy, timeout=aiohttp.ClientTimeout(total=5)):
+                        return True
             except Exception:
                 return False
 
-        results = await asyncio.gather(*[_check_single(p) for p in self._proxies])
-
+        results = await asyncio.gather(*[_check(p) for p in self._proxies])
+        db = await get_db()
         for p, is_active in zip(self._proxies, results):
             p.active = is_active
-            p.cooldown_until = 0 if is_active else p.cooldown_until
-            if is_active:
-                active_count += 1
-            else:
+            if not is_active:
                 dead_count += 1
-
-            if supabase:
-                try:
-                    await supabase.table("proxies").update(
-                        {"active": p.active, "cooldown_until": p.cooldown_until}
-                    ).eq("proxy", p.proxy).execute()
-                except Exception:
-                    pass
-
-        return {
-            "total": len(self._proxies),
-            "active_count": active_count,
-            "dead_count": dead_count,
-        }
+            else:
+                active_count += 1
+            await db.execute("UPDATE proxies SET active=? WHERE proxy=?", (int(p.active), p.proxy))
+        await db.commit()
+        return {"total": len(self._proxies), "active_count": active_count, "dead_count": dead_count}
 
     def get_all_proxies(self) -> list[ProxyEntry]:
         return self._proxies
@@ -143,31 +106,9 @@ class ProxyManager:
         available = [p for p in self._proxies if p.active and p.cooldown_until < now]
         if not available:
             return None
-        proxy = available[self._current_index % len(available)]
+        idx = self._current_index % len(available)
         self._current_index = (self._current_index + 1) % len(available)
-        return proxy.proxy
-
-    async def set_cooldown(self, proxy_url: str) -> None:
-        if not proxy_url:
-            return
-        entry = next(
-            (p for p in self._proxies if proxy_url in p.proxy or p.proxy in proxy_url),
-            None,
-        )
-        if entry:
-            duration = 15 * 60 * 1000  # 15 mins
-            entry.cooldown_until = int(time.time() * 1000) + duration
-            logger.info("[Cooldown Proxy] set for 15 mins")
-            if supabase:
-                try:
-                    await supabase.table("proxies").update(
-                        {"cooldown_until": entry.cooldown_until}
-                    ).eq("proxy", entry.proxy).execute()
-                except Exception:
-                    pass
-
-    def has_proxies(self) -> bool:
-        return any(p.active for p in self._proxies)
+        return available[idx].proxy
 
 
 proxy_manager = ProxyManager()

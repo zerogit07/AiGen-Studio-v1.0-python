@@ -1,25 +1,16 @@
+"""Message handlers — text input, photo uploads, broadcast."""
 from __future__ import annotations
 
+import asyncio
 import logging
-import re
+import time
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
+from aiogram import Bot, F, Router
+from aiogram.types import Message
 
-from src.bot.handlers.commands import handle_start_command
-from src.bot.menus.admin_ui import (
-    get_home_page_keyboard,
-    get_limit_page_keyboard,
-    get_payment_page_keyboard,
-    get_price_page_keyboard,
-)
 from src.bot.panels.kling_v3_panel import get_kv3_state, render_kling_v3_panel
-from src.bot.state import (
-    ADMIN_IDS,
-    get_or_create_state,
-    is_user_admin,
-    user_state,
-)
+from src.bot.state import ADMIN_IDS, get_or_create_state, is_user_admin
+from src.core.triple_pool import triple_pool
 from src.database.apikeys import api_key_manager
 from src.database.members import member_manager
 from src.database.models import model_manager
@@ -27,372 +18,286 @@ from src.database.proxies import proxy_manager
 from src.database.settings import landing_page_manager
 from src.database.usage import usage_manager
 from src.database.users import user_manager
-from src.core.queue import add_job
+from src.services.jobs import finalize_job
 
 logger = logging.getLogger(__name__)
+router = Router(name="messages")
 
 _user_last_command: dict[int, float] = {}
-COMMAND_COOLDOWN = 2.0
 
 
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle all text messages."""
-    user = update.effective_user
-    if not user or not update.message or not update.message.text:
+@router.message(F.text)
+async def text_handler(message: Message, bot: Bot) -> None:
+    user = message.from_user
+    if not user or not message.text:
         return
 
     user_id = user.id
-    chat_id = update.effective_chat.id
-    text = update.message.text
+    chat_id = message.chat.id
+    text = message.text.strip()
 
-    import time as _time
-    now = _time.time()
-    if user_id in _user_last_command and now - _user_last_command[user_id] < COMMAND_COOLDOWN:
+    now = time.time()
+    if user_id in _user_last_command and now - _user_last_command[user_id] < 2.0:
         return
     _user_last_command[user_id] = now
 
-    # Intercept for Kling V3 Panel inputs
+    state = await get_or_create_state(user_id, user.username or "", user.first_name or "", user.last_name or "")
+
+    # KV3 panel text input
     kv3 = get_kv3_state(user_id)
-    if kv3.awaiting_input:
-        if kv3.awaiting_input == "single_prompt":
-            kv3.prompt = text
-        elif kv3.awaiting_input.startswith("shot_prompt_"):
-            idx = int(kv3.awaiting_input.replace("shot_prompt_", ""))
-            if 0 <= idx < len(kv3.shots):
-                kv3.shots[idx]["prompt"] = text
-        elif kv3.awaiting_input == "element":
-            await update.message.reply_text(
-                "Input tidak valid. Kirimkan file gambar (bukan teks) untuk Referensi Karakter (Element)."
-            )
-            return
-
-        if kv3.awaiting_input != "element":
-            kv3.awaiting_input = None
-            await update.message.reply_text("Input diterima.", parse_mode="Markdown")
-            await render_kling_v3_panel(context.bot, chat_id, user_id, is_edit=False, force_model=kv3.model_type)
-            return
-
-    state = await get_or_create_state(user_id, user.username, user.first_name, user.last_name)
-
-    # Maintenance Check
-    if model_manager.is_maintenance() and not is_user_admin(user_id, state):
-        await update.message.reply_text(
-            "*BOT MAINTENANCE*\n\nBot sedang dalam perawatan rutin untuk peningkatan kualitas. "
-            "Silakan kembali lagi nanti ya, Bosku!",
-            parse_mode="Markdown",
-        )
+    if kv3.awaiting_input == "prompt":
+        kv3.prompt = text
+        kv3.awaiting_input = None
+        await message.reply("Prompt diterima!")
+        await render_kling_v3_panel(bot, chat_id, user_id, is_edit=False, force_model=kv3.model_type)
         return
 
-    # Admin chat start
-    if state.waiting_chat_id:
-        state.waiting_chat_id = False
-        try:
-            target_id = int(text)
-        except ValueError:
-            await update.message.reply_text("User ID harus berupa angka.")
-            return
-        state.chatting_with = target_id
-        state.step = "IN_CHAT"
-        await update.message.reply_text(
-            f"*CHAT DIMULAI*\n\nAnda sekarang terhubung dengan User ID: `{target_id}`.\n\n"
-            f"Semua pesan yang Anda ketik akan dikirim ke user tersebut.\n\n"
-            f"Klik tombol di bawah untuk berhenti:",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Tutup Chat", callback_data="close_chat")]
-            ]),
-        )
+    if kv3.awaiting_input == "shot_prompt":
+        dur = int(kv3.duration.replace("s", "")) if kv3.duration else 5
+        kv3.shots.append({"prompt": text, "duration": dur})
+        kv3.awaiting_input = None
+        await message.reply(f"Shot {len(kv3.shots)} diterima!")
+        await render_kling_v3_panel(bot, chat_id, user_id, is_edit=False, force_model=kv3.model_type)
         return
 
-    # Admin chat in progress
-    if state.chatting_with and state.step == "IN_CHAT":
-        try:
-            await context.bot.send_message(
-                chat_id=state.chatting_with,
-                text=f"*PESAN DARI ADMIN:*\n\n{text}",
-                parse_mode="Markdown",
-            )
-            await update.message.reply_text(
-                "Pesan terkirim.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Tutup Chat", callback_data="close_chat")]
-                ]),
-            )
-        except Exception as exc:
-            await update.message.reply_text(f"Gagal mengirim pesan: {exc}")
-        return
-
-    # Check if user is replying to admin chat
-    for admin_id, admin_state in user_state.items():
-        if admin_state.chatting_with == user_id and admin_state.step == "IN_CHAT":
-            await context.bot.send_message(
-                chat_id=admin_id,
-                text=f"*BALASAN DARI USER* (`{user_id}`):\n\n{text}",
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Tutup Chat", callback_data="close_chat")]
-                ]),
-            )
-            await update.message.reply_text("Balasan Anda telah dikirim ke Admin.")
-            return
-
-    # LP settings handlers
-    lp_handlers = {
-        "waiting_lp_banner_img": ("bannerImage", "Gambar Banner diperbarui!", "url"),
-        "waiting_lp_banner_desc": ("bannerDescription", "Deskripsi Banner diperbarui!", "text"),
-        "waiting_lp_pay_img": ("paymentImage", "Gambar Payment diperbarui!", "url"),
-        "waiting_lp_pay_desc_lite": ("paymentDescriptionLite", "Deskripsi Lite diperbarui!", "text"),
-        "waiting_lp_pay_desc_pro": ("paymentDescriptionPro", "Deskripsi Pro diperbarui!", "text"),
-        "waiting_lp_pay_desc_ultra": ("paymentDescriptionUltra", "Deskripsi Ultra diperbarui!", "text"),
-        "waiting_lp_limit_lite": ("limitLite", None, "number"),
-        "waiting_lp_limit_pro": ("limitPro", None, "number"),
-        "waiting_lp_limit_ultra": ("limitUltra", None, "number"),
-        "waiting_lp_price_lite": ("priceLite", None, "price"),
-        "waiting_lp_price_pro": ("pricePro", None, "price"),
-        "waiting_lp_price_ultra": ("priceUltra", None, "price"),
-    }
-
-    for attr, (setting_key, success_msg, val_type) in lp_handlers.items():
-        if getattr(state, attr, False):
-            setattr(state, attr, False)
-            if val_type == "url" and not text.startswith("http"):
-                await update.message.reply_text("Link tidak valid.")
-                return
-            if val_type == "number":
-                try:
-                    int(text)
-                except ValueError:
-                    await update.message.reply_text("Input harus berupa angka.")
-                    return
-                await landing_page_manager.set_setting(setting_key, text)
-                await update.message.reply_text(
-                    f"Limit diperbarui menjadi {text} video/hari!",
-                    reply_markup=get_limit_page_keyboard(),
-                )
-                return
-            if val_type == "price":
-                price = re.sub(r"\D", "", text)
-                try:
-                    int(price)
-                except ValueError:
-                    await update.message.reply_text("Input harus berupa angka.")
-                    return
-                await landing_page_manager.set_setting(setting_key, price)
-                formatted = f"{int(price):,}".replace(",", ".")
-                await update.message.reply_text(
-                    f"Harga diperbarui menjadi Rp{formatted}!",
-                    reply_markup=get_price_page_keyboard(),
-                )
-                return
-            await landing_page_manager.set_setting(setting_key, text)
-            await update.message.reply_text(success_msg or "Diperbarui!")
-            return
-
-    # API Key input
+    # API Key input (admin)
     if state.awaiting_api_key:
-        lines = [l.strip() for l in text.split("\n") if l.strip()]
-        added = 0
-        invalid = 0
-        for key in lines:
-            if key.upper().startswith("FPSX") or len(key) >= 20:
-                await api_key_manager.add_key(key)
-                added += 1
-            else:
-                invalid += 1
         state.awaiting_api_key = False
-        response = f"Berhasil menambahkan {added} key baru ke pool global."
-        if invalid > 0:
-            response += f"\n{invalid} key tidak valid (harus diawali 'FPSX')."
-        response += f"\nTotal key tersimpan: {len(api_key_manager.get_all_keys())}"
-        await update.message.reply_text(response)
+        if not is_user_admin(user_id):
+            return
+        keys_added = 0
+        for line in text.split("\n"):
+            line = line.strip()
+            if line:
+                await api_key_manager.add_key(line)
+                keys_added += 1
+        triple_pool.rebuild()
+        await message.reply(f"\u2705 {keys_added} API key ditambahkan.")
         return
 
-    # Proxy input
+    # Proxy input (admin)
     if state.waiting_proxy:
-        lines = [l.strip() for l in text.split("\n") if l.strip()]
-        for proxy in lines:
-            await proxy_manager.add_proxy(proxy)
         state.waiting_proxy = False
-        await update.message.reply_text(f"Berhasil menambahkan {len(lines)} proxy.")
+        if not is_user_admin(user_id):
+            return
+        proxies_added = 0
+        for line in text.split("\n"):
+            line = line.strip()
+            if line:
+                await proxy_manager.add_proxy(line)
+                proxies_added += 1
+        triple_pool.rebuild()
+        await message.reply(f"\u2705 {proxies_added} proxy ditambahkan.")
         return
 
-    # Add member
+    # Add member (admin)
     if state.waiting_add_member:
         state.waiting_add_member = False
+        if not is_user_admin(user_id):
+            return
         parts = text.split()
         if len(parts) < 3:
-            await update.message.reply_text("Format: USER_ID PLAN HARI\nContoh: 123456789 pro 30")
+            await message.reply("Format salah. Gunakan: `user_id plan hari`", parse_mode="Markdown")
             return
         try:
             target_uid = int(parts[0])
             plan = parts[1].lower()
             days = int(parts[2])
-        except (ValueError, IndexError):
-            await update.message.reply_text("Format tidak valid.")
+        except ValueError:
+            await message.reply("Format salah. Contoh: `123456789 pro 30`", parse_mode="Markdown")
             return
         if plan not in ("lite", "pro", "ultra", "testing"):
-            await update.message.reply_text("Plan harus: lite, pro, ultra, atau testing")
+            await message.reply("Plan harus lite, pro, ultra, atau testing.")
             return
         await member_manager.add_member(target_uid, plan, days)
-        await update.message.reply_text(
-            f"Member ditambahkan!\nUser: `{target_uid}`\nPlan: {plan}\nDurasi: {days} hari",
-            parse_mode="Markdown",
-        )
+        await message.reply(f"\u2705 Member `{target_uid}` ditambahkan ({plan}, {days} hari).", parse_mode="Markdown")
         return
 
-    # Broadcast
+    # Broadcast (admin)
     if state.waiting_broadcast:
         state.waiting_broadcast = False
+        if not is_user_admin(user_id):
+            return
         target = state.broadcast_target or "all"
-        users_to_send: list[str] = []
+        state.broadcast_target = None
+
+        users_to_send: list[int] = []
         if target == "all":
             users_to_send = user_manager.get_all_users()
         elif target == "member":
             users_to_send = [
-                uid for uid, m in member_manager.get_all_members().items()
+                int(uid) for uid, m in member_manager.get_all_members().items()
                 if m.plan in ("lite", "pro", "ultra")
             ]
         elif target == "trial":
-            users_to_send = member_manager.get_members_by_plan("testing")
+            users_to_send = [int(uid) for uid in member_manager.get_members_by_plan("testing")]
 
         sent = 0
         failed = 0
-        import asyncio as _asyncio
-        await update.message.reply_text(f"Mengirim broadcast ke {len(users_to_send)} user...")
+        await message.reply(f"Mengirim broadcast ke {len(users_to_send)} user...")
         for i, uid in enumerate(users_to_send):
             try:
-                await context.bot.send_message(chat_id=int(uid), text=text, parse_mode="Markdown")
+                await bot.send_message(chat_id=uid, text=text, parse_mode="Markdown")
                 sent += 1
             except Exception:
                 failed += 1
             if (i + 1) % 25 == 0:
-                await _asyncio.sleep(1.0)
-        await update.message.reply_text(
-            f"*Broadcast Selesai*\n- Terkirim: {sent}\n- Gagal: {failed}",
-            parse_mode="Markdown",
-        )
+                await asyncio.sleep(1.0)
+        await message.reply(f"*Broadcast Selesai*\n- Terkirim: {sent}\n- Gagal: {failed}", parse_mode="Markdown")
         return
 
-    # Check user
+    # Check user (admin)
     if state.waiting_check_user:
         state.waiting_check_user = False
         try:
             target_uid = int(text)
         except ValueError:
-            await update.message.reply_text("User ID harus angka.")
+            await message.reply("User ID harus angka.")
             return
         member = member_manager.get_member_data(target_uid)
         user_data = await user_manager.get_user_data(target_uid)
         if not member and not user_data:
-            await update.message.reply_text(f"User `{target_uid}` tidak ditemukan.", parse_mode="Markdown")
+            await message.reply(f"User `{target_uid}` tidak ditemukan.", parse_mode="Markdown")
             return
         info = f"*Info User `{target_uid}`*\n\n"
         if user_data:
-            info += f"Username: {user_data.get('username', '-')}\n"
-            info += f"Nama: {user_data.get('full_name', '-')}\n"
+            info += f"Username: {user_data.get('username', '-')}\nNama: {user_data.get('full_name', '-')}\n"
         if member:
-            info += f"Plan: {member.plan}\n"
-            info += f"Aktif: {member.active}\n"
-            info += f"Expired: {member.expire_date or '-'}\n"
-        await update.message.reply_text(info, parse_mode="Markdown")
+            info += f"Plan: {member.plan}\nAktif: {member.active}\nExpired: {member.expire_date or '-'}\n"
+        await message.reply(info, parse_mode="Markdown")
         return
 
-    # Payment proof
+    # Payment proof (text)
     if state.waiting_payment_proof:
         state.waiting_payment_proof = False
-        # Notify admins
         for admin_id in ADMIN_IDS:
             try:
-                await context.bot.send_message(
+                await bot.send_message(
                     chat_id=admin_id,
                     text=(
                         f"*BUKTI PEMBAYARAN BARU*\n\n"
-                        f"User: `{user_id}`\n"
-                        f"Plan: {state.temp_plan}\n"
-                        f"Kode Unik: {state.temp_unique_code}\n\n"
-                        f"Pesan: {text}"
+                        f"User: `{user_id}`\nPlan: {state.temp_plan}\n"
+                        f"Kode Unik: {state.temp_unique_code}\n\nPesan: {text}"
                     ),
                     parse_mode="Markdown",
                 )
             except Exception:
                 pass
-        await update.message.reply_text(
-            "*Bukti pembayaran diterima!*\n\nAdmin akan memverifikasi pembayaran Anda. Mohon tunggu.",
-            parse_mode="Markdown",
-        )
+        await message.reply("*Bukti pembayaran diterima!*\n\nAdmin akan memverifikasi.", parse_mode="Markdown")
         return
 
-    # ─── Remove Member (Admin) ─────────────────────────
+    # Remove member (admin)
     if state.step == "WAIT_REMOVE_MEMBER":
         state.step = None
         target_id = text.strip()
         try:
             await member_manager.remove_member(target_id)
-            await update.message.reply_text(f"Member `{target_id}` berhasil dihapus.", parse_mode="Markdown")
+            await message.reply(f"Member `{target_id}` berhasil dihapus.", parse_mode="Markdown")
         except Exception as exc:
             logger.error("Error removing member %s: %s", target_id, exc)
-            await update.message.reply_text("Gagal menghapus member. Coba lagi.")
+            await message.reply("Gagal menghapus member. Coba lagi.")
         return
 
-    # ─── Prompt Input (Generate) ─────────────────────────
+    # LP settings handlers (admin)
+    lp_handlers = [
+        ("waiting_lp_banner_img", "bannerImage"),
+        ("waiting_lp_banner_desc", "bannerDescription"),
+        ("waiting_lp_pay_img", "paymentImage"),
+        ("waiting_lp_pay_desc_lite", "paymentDescriptionLite"),
+        ("waiting_lp_pay_desc_pro", "paymentDescriptionPro"),
+        ("waiting_lp_pay_desc_ultra", "paymentDescriptionUltra"),
+        ("waiting_lp_price_lite", "priceLite"),
+        ("waiting_lp_price_pro", "pricePro"),
+        ("waiting_lp_price_ultra", "priceUltra"),
+    ]
+    for attr, setting_key in lp_handlers:
+        if getattr(state, attr, False):
+            setattr(state, attr, False)
+            if not is_user_admin(user_id):
+                return
+            await landing_page_manager.update_setting(setting_key, text)
+            await message.reply(f"\u2705 {setting_key} diperbarui.")
+            return
+
+    # Prompt input (generate)
     if state.step == "WAIT_PROMPT" and state.model:
         member_data = await member_manager.sync_member(user_id)
         if not member_data:
-            await update.message.reply_text("Anda belum terdaftar sebagai member. Silakan daftar terlebih dahulu.")
+            await message.reply("Anda belum terdaftar sebagai member. Silakan daftar terlebih dahulu.")
             state.step = None
             return
         if member_data.is_expired and member_data.plan != "testing":
-            await update.message.reply_text("Membership Anda sudah expired. Silakan perpanjang.")
+            await message.reply("Membership Anda sudah expired. Silakan perpanjang.")
             state.step = None
             return
         if not member_data.active:
-            await update.message.reply_text("Akun Anda sedang dinonaktifkan. Hubungi admin.")
+            await message.reply("Akun Anda sedang dinonaktifkan. Hubungi admin.")
             state.step = None
             return
         usage_data = await usage_manager.get_usage(user_id)
         daily_limit = member_manager.get_daily_limit(member_data.plan, user_id)
         if usage_data.video_today >= daily_limit:
-            await update.message.reply_text(
-                f"Kuota harian Anda sudah habis ({usage_data.video_today}/{daily_limit}). Coba lagi besok.",
-            )
+            await message.reply(f"Kuota harian habis ({usage_data.video_today}/{daily_limit}). Coba lagi besok.")
             state.step = None
             return
         if member_data.plan == "testing" and member_data.testing_quota <= 0:
-            await update.message.reply_text("Kuota trial Anda sudah habis.")
+            await message.reply("Kuota trial Anda sudah habis.")
+            state.step = None
+            return
+        if model_manager.is_maintenance():
+            await message.reply("Bot sedang dalam mode maintenance. Coba lagi nanti.")
             state.step = None
             return
 
-        is_maintenance = model_manager.is_maintenance()
-        if is_maintenance:
-            await update.message.reply_text("Bot sedang dalam mode maintenance. Coba lagi nanti.")
+        can_start = await member_manager.start_process(user_id, member_data.plan)
+        if not can_start:
+            await message.reply("Proses penuh. Tunggu proses sebelumnya selesai.")
             state.step = None
             return
 
         state.temp_prompt = text
         state.step = None
-        job_id = await add_job(
+
+        status_msg = await message.reply("\u23f3 Memproses permintaan Anda...")
+
+        state_data = {
+            "duration": state.duration,
+            "aspect_ratio": state.aspect_ratio,
+            "orientation": state.orientation,
+            "resolution": state.resolution,
+            "temp_image_url": state.temp_image_url,
+            "temp_image_url_last": state.temp_image_url_last,
+            "temp_image_refs": list(state.temp_image_refs),
+            "temp_video_url": state.temp_video_url,
+            "generate_audio": state.generate_audio,
+            "shots": [{"prompt": s.prompt, "duration": s.duration} for s in state.shots],
+            "kling3_mode": state.kling3_mode,
+            "camera_config": state.camera_config,
+        }
+
+        asyncio.create_task(finalize_job(
+            bot=bot,
             user_id=user_id,
             chat_id=chat_id,
             prompt=text,
             model_id=state.model,
-            state=state,
-        )
-        await update.message.reply_text(f"Permintaanmu masuk antrian. ID job: #{job_id}")
+            state_data=state_data,
+            status_msg_id=status_msg.message_id,
+        ))
         return
 
 
-async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle photo messages (for image upload in various flows)."""
-    user = update.effective_user
-    if not user or not update.message or not update.message.photo:
+@router.message(F.photo)
+async def photo_handler(message: Message, bot: Bot) -> None:
+    user = message.from_user
+    if not user or not message.photo:
         return
 
     user_id = user.id
-    chat_id = update.effective_chat.id
+    chat_id = message.chat.id
 
-    # Get best quality photo
-    photo = update.message.photo[-1]
-    file = await context.bot.get_file(photo.file_id)
+    photo = message.photo[-1]
+    file = await bot.get_file(photo.file_id)
     file_url = file.file_path
 
     # KV3 panel image upload
@@ -401,39 +306,38 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if kv3.awaiting_input == "first_frame":
             kv3.first_frame_url = file_url
             kv3.awaiting_input = None
-            await update.message.reply_text("First Frame diterima!")
-            await render_kling_v3_panel(context.bot, chat_id, user_id, is_edit=False, force_model=kv3.model_type)
+            await message.reply("First Frame diterima!")
+            await render_kling_v3_panel(bot, chat_id, user_id, is_edit=False, force_model=kv3.model_type)
             return
         elif kv3.awaiting_input == "end_frame":
             kv3.end_frame_url = file_url
             kv3.awaiting_input = None
-            await update.message.reply_text("End Frame diterima!")
-            await render_kling_v3_panel(context.bot, chat_id, user_id, is_edit=False, force_model=kv3.model_type)
+            await message.reply("End Frame diterima!")
+            await render_kling_v3_panel(bot, chat_id, user_id, is_edit=False, force_model=kv3.model_type)
             return
         elif kv3.awaiting_input == "element":
             if len(kv3.element_urls) < 3:
                 kv3.element_urls.append(file_url)
-                await update.message.reply_text(f"Element {len(kv3.element_urls)}/3 diterima!")
+                await message.reply(f"Element {len(kv3.element_urls)}/3 diterima!")
                 if len(kv3.element_urls) >= 3:
                     kv3.awaiting_input = None
-                    await render_kling_v3_panel(context.bot, chat_id, user_id, is_edit=False, force_model=kv3.model_type)
+                    await render_kling_v3_panel(bot, chat_id, user_id, is_edit=False, force_model=kv3.model_type)
             return
 
-    state = await get_or_create_state(user_id, user.username, user.first_name, user.last_name)
+    state = await get_or_create_state(user_id, user.username or "", user.first_name or "", user.last_name or "")
 
     # Payment proof as photo
     if state.waiting_payment_proof:
         state.waiting_payment_proof = False
-        caption = update.message.caption or ""
+        caption = message.caption or ""
         for admin_id in ADMIN_IDS:
             try:
-                await context.bot.send_photo(
+                await bot.send_photo(
                     chat_id=admin_id,
                     photo=photo.file_id,
                     caption=(
                         f"*BUKTI PEMBAYARAN BARU*\n\n"
-                        f"User: `{user_id}`\n"
-                        f"Plan: {state.temp_plan}\n"
+                        f"User: `{user_id}`\nPlan: {state.temp_plan}\n"
                         f"Kode Unik: {state.temp_unique_code}\n"
                         f"Keterangan: {caption}"
                     ),
@@ -441,27 +345,45 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 )
             except Exception:
                 pass
-        await update.message.reply_text(
-            "*Bukti pembayaran diterima!*\n\nAdmin akan memverifikasi pembayaran Anda.",
-            parse_mode="Markdown",
-        )
+        await message.reply("*Bukti pembayaran diterima!*\n\nAdmin akan memverifikasi.", parse_mode="Markdown")
         return
 
     # Image for generate (prompt with image)
     if state.step == "WAIT_PROMPT" and state.model:
         state.temp_image_url = file_url
-        caption = update.message.caption or ""
+        caption = message.caption or ""
         if caption:
             state.temp_prompt = caption
             state.step = None
-            job_id = await add_job(
+
+            can_start = await member_manager.start_process(user_id, (await member_manager.sync_member(user_id) or type("", (), {"plan": "testing"})).plan)
+            if not can_start:
+                await message.reply("Proses penuh. Tunggu proses sebelumnya selesai.")
+                return
+
+            status_msg = await message.reply("\u23f3 Memproses permintaan Anda...")
+            state_data = {
+                "duration": state.duration,
+                "aspect_ratio": state.aspect_ratio,
+                "orientation": state.orientation,
+                "resolution": state.resolution,
+                "temp_image_url": state.temp_image_url,
+                "temp_image_url_last": state.temp_image_url_last,
+                "temp_image_refs": list(state.temp_image_refs),
+                "generate_audio": state.generate_audio,
+                "shots": [{"prompt": s.prompt, "duration": s.duration} for s in state.shots],
+                "kling3_mode": state.kling3_mode,
+                "camera_config": state.camera_config,
+            }
+            asyncio.create_task(finalize_job(
+                bot=bot,
                 user_id=user_id,
                 chat_id=chat_id,
                 prompt=caption,
                 model_id=state.model,
-                state=state,
-            )
-            await update.message.reply_text(f"Permintaanmu masuk antrian. ID job: #{job_id}")
+                state_data=state_data,
+                status_msg_id=status_msg.message_id,
+            ))
         else:
-            await update.message.reply_text("🖼 Gambar diterima! Sekarang kirimkan prompt teks Anda:")
+            await message.reply("\U0001f5bc Gambar diterima! Sekarang kirimkan prompt teks Anda:")
         return

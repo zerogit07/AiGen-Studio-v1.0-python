@@ -8,14 +8,14 @@ from typing import Optional
 class ApiKey:
     key: str
     active: bool = True
-    cooldown_until: int = 0  # timestamp in ms
+    cooldown_until: int = 0
 
 
 @dataclass
 class ProxyEntry:
     proxy: str
     active: bool = True
-    cooldown_until: int = 0  # timestamp in ms
+    cooldown_until: int = 0
 
 
 @dataclass
@@ -30,10 +30,10 @@ class TripleSet:
 
 @dataclass
 class MemberData:
-    plan: str  # "lite" | "pro" | "ultra" | "testing"
+    user_id: str = ""
+    plan: str = "testing"
     start_date: Optional[str] = None
     expire_date: Optional[str] = None
-    expired: Optional[str] = None
     quota_used: int = 0
     testing_quota: int = 0
     active: bool = True
@@ -58,14 +58,14 @@ class UserStats:
 @dataclass
 class UserState:
     model: Optional[str] = None
-    mode: Optional[str] = None  # "interpolation" | "reference"
-    kling3_mode: Optional[str] = None  # "single" | "multi_intelligence" | "multi_customize"
+    mode: Optional[str] = None
+    kling3_mode: Optional[str] = None
     duration: Optional[str] = None
     aspect_ratio: Optional[str] = None
-    orientation: Optional[str] = None  # "video" | "image"
+    orientation: Optional[str] = None
     generate_audio: bool = True
     use_image: bool = False
-    resolution: Optional[str] = None  # "720" | "1080" | "4k" | "1k" | "2k"
+    resolution: Optional[str] = None
     step: Optional[str] = None
     temp_image_url: Optional[str] = None
     temp_image_url_last: Optional[str] = None
@@ -80,7 +80,7 @@ class UserState:
     waiting_proxy: bool = False
     waiting_add_member: bool = False
     waiting_broadcast: bool = False
-    broadcast_target: Optional[str] = None  # "all" | "member" | "trial"
+    broadcast_target: Optional[str] = None
     waiting_payment_proof: bool = False
     waiting_welcome_banner: bool = False
     waiting_welcome_headline: bool = False
@@ -102,7 +102,7 @@ class UserState:
     waiting_lp_price_pro: bool = False
     waiting_lp_price_ultra: bool = False
     temp_unique_code: int = 0
-    temp_plan: Optional[str] = None  # "lite" | "pro" | "ultra"
+    temp_plan: Optional[str] = None
     is_admin: bool = False
     stats: UserStats = field(default_factory=UserStats)
     current_page: int = 0

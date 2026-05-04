@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from src.core.types import MemberData
-from src.database.client import supabase
-from src.database.settings import landing_page_manager
+from src.database.db import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -19,99 +19,83 @@ class MemberManager:
         self._last_sync: dict[str, float] = {}
 
     async def load_members(self) -> None:
-        if not supabase:
-            return
+        db = await get_db()
         try:
-            resp = await supabase.table("members").select("*").execute()
-            for row in resp.data or []:
-                id_str = str(row["user_id"])
-                self._members[id_str] = MemberData(
-                    plan=row.get("plan", "testing"),
-                    expire_date=row.get("expired"),
-                    testing_quota=row.get("testing_quota", 0),
-                    active=row.get("active", True),
-                    current_process=row.get("current_process", 0),
+            async with db.execute("SELECT * FROM members") as cursor:
+                rows = await cursor.fetchall()
+            for row in rows:
+                uid = str(row["user_id"])
+                self._members[uid] = MemberData(
+                    user_id=uid,
+                    plan=row["plan"] or "testing",
+                    expire_date=row["expired"],
+                    testing_quota=row["testing_quota"] or 0,
+                    active=bool(row["active"]),
+                    current_process=row["current_process"] or 0,
                 )
-            logger.info("Loaded %d members from Supabase.", len(self._members))
+            logger.info("Loaded %d members.", len(self._members))
         except Exception as exc:
             logger.error("Error loading members: %s", exc)
 
     async def load_custom_limits(self) -> None:
-        if not supabase:
-            return
+        db = await get_db()
         try:
-            resp = (
-                await supabase.table("settings")
-                .select("id, data")
-                .eq("id", "custom_limits")
-                .execute()
-            )
-            if resp.data and resp.data[0].get("data"):
-                limits_data = resp.data[0]["data"]
+            async with db.execute("SELECT data FROM settings WHERE id='custom_limits'") as cursor:
+                row = await cursor.fetchone()
+            if row and row["data"]:
+                limits_data = json.loads(row["data"])
                 for user_id, limits in limits_data.items():
                     if isinstance(limits, dict):
-                        self._custom_limits[user_id] = {}
-                        for limit_type, val in limits.items():
-                            try:
-                                self._custom_limits[user_id][limit_type] = int(val)
-                            except (ValueError, TypeError):
-                                pass
-            logger.info(
-                "Loaded custom limits for %d users.", len(self._custom_limits)
-            )
+                        self._custom_limits[user_id] = {
+                            k: int(v) for k, v in limits.items()
+                            if isinstance(v, (int, str)) and str(v).isdigit()
+                        }
+            logger.info("Loaded custom limits for %d users.", len(self._custom_limits))
         except Exception as exc:
             logger.error("Error loading custom limits: %s", exc)
 
     async def sync_member(self, user_id: int | str) -> MemberData | None:
-        id_str = str(user_id)
-
+        uid = str(user_id)
         now = time.time()
-        if id_str in self._last_sync and now - self._last_sync[id_str] < 60:
+        if uid in self._last_sync and now - self._last_sync[uid] < 60:
             return self.get_member_data(user_id)
 
-        if supabase:
-            try:
-                self._last_sync[id_str] = now
-                resp = (
-                    await supabase.table("members")
-                    .select("*")
-                    .eq("user_id", id_str)
-                    .single()
-                    .execute()
+        db = await get_db()
+        try:
+            self._last_sync[uid] = now
+            async with db.execute("SELECT * FROM members WHERE user_id=?", (uid,)) as cursor:
+                row = await cursor.fetchone()
+            if row:
+                existing = self._members.get(uid)
+                self._members[uid] = MemberData(
+                    user_id=uid,
+                    plan=row["plan"] or (existing.plan if existing else "testing"),
+                    expire_date=row["expired"] or (existing.expire_date if existing else None),
+                    testing_quota=row["testing_quota"] if row["testing_quota"] is not None else (existing.testing_quota if existing else 0),
+                    active=bool(row["active"]) if row["active"] is not None else (existing.active if existing else True),
+                    current_process=row["current_process"] or (existing.current_process if existing else 0),
                 )
-                if resp.data:
-                    existing = self._members.get(id_str)
-                    new_data = MemberData(
-                        plan=resp.data.get("plan", existing.plan if existing else "testing"),
-                        expire_date=resp.data.get("expired", existing.expire_date if existing else None),
-                        testing_quota=resp.data.get("testing_quota", existing.testing_quota if existing else 0),
-                        active=resp.data.get("active", existing.active if existing else True),
-                        current_process=resp.data.get("current_process", existing.current_process if existing else 0),
-                    )
-                    self._members[id_str] = new_data
-            except Exception:
-                pass
+        except Exception:
+            pass
         return self.get_member_data(user_id)
 
     async def count_active_processes(self, user_id: int | str) -> int:
-        if supabase:
-            try:
-                resp = (
-                    await supabase.table("jobs")
-                    .select("*", count="exact")
-                    .eq("user_id", str(user_id))
-                    .eq("status", "processing")
-                    .execute()
-                )
-                if resp.count is not None:
-                    return resp.count
-            except Exception:
-                pass
+        db = await get_db()
+        try:
+            async with db.execute(
+                "SELECT COUNT(*) as cnt FROM jobs WHERE user_id=? AND status='processing'",
+                (str(user_id),),
+            ) as cursor:
+                row = await cursor.fetchone()
+            if row:
+                return row["cnt"]
+        except Exception:
+            pass
         return self._in_progress_count.get(str(user_id), 0)
 
     def get_member_data(self, user_id: int | str) -> MemberData | None:
-        id_str = str(user_id)
-        data = self._members.get(id_str)
+        uid = str(user_id)
+        data = self._members.get(uid)
         if not data:
             return None
 
@@ -126,171 +110,105 @@ class MemberManager:
 
         is_expired = now > expire_date
         diff = (expire_date - now).days
-
         data.is_expired = is_expired
         data.remaining_days = max(0, diff) if not is_expired else 0
-        data.is_member = True
         return data
 
-    def get_daily_limit(self, plan: str, user_id: int | str | None = None) -> int:
-        if user_id:
-            id_str = str(user_id)
-            custom = self._custom_limits.get(id_str, {}).get("daily")
-            if custom:
-                return custom
-        if plan == "ultra":
-            return int(landing_page_manager.get_setting("limitUltra") or "999")
-        if plan == "pro":
-            return int(landing_page_manager.get_setting("limitPro") or "50")
-        if plan == "lite":
-            return int(landing_page_manager.get_setting("limitLite") or "20")
-        return 3  # free trial
+    def get_all_members(self) -> dict[str, MemberData]:
+        for uid in self._members:
+            self.get_member_data(uid)
+        return dict(self._members)
 
-    def get_max_process(self, plan: str, user_id: int | str | None = None) -> int:
-        if user_id:
-            id_str = str(user_id)
-            custom = self._custom_limits.get(id_str, {}).get("max")
-            if custom:
-                return custom
-        if plan == "ultra":
-            return int(landing_page_manager.get_setting("maxUltra") or "5")
-        if plan == "pro":
-            return int(landing_page_manager.get_setting("maxPro") or "3")
-        if plan == "lite":
-            return int(landing_page_manager.get_setting("maxLite") or "2")
-        return 1
+    def get_members_by_plan(self, plan: str) -> list[str]:
+        return [uid for uid, m in self._members.items() if m.plan == plan]
 
-    async def reset_process(self, user_id: int | str) -> None:
-        id_str = str(user_id)
-        self._in_progress_count[id_str] = 0
-        if supabase:
-            try:
-                await supabase.table("members").update({"current_process": 0}).eq(
-                    "user_id", id_str
-                ).execute()
-            except Exception:
-                pass
+    def get_daily_limit(self, plan: str, user_id: int | str) -> int:
+        uid = str(user_id)
+        if uid in self._custom_limits and "daily" in self._custom_limits[uid]:
+            return self._custom_limits[uid]["daily"]
+        from src.core.constants import DEFAULT_SETTINGS
+        limits = {"lite": int(DEFAULT_SETTINGS["limitLite"]), "pro": int(DEFAULT_SETTINGS["limitPro"]), "ultra": int(DEFAULT_SETTINGS["limitUltra"]), "testing": 3}
+        return limits.get(plan, 3)
+
+    def get_max_process(self, plan: str, user_id: int | str) -> int:
+        uid = str(user_id)
+        if uid in self._custom_limits and "max_process" in self._custom_limits[uid]:
+            return self._custom_limits[uid]["max_process"]
+        from src.core.constants import DEFAULT_SETTINGS
+        maxes = {"lite": int(DEFAULT_SETTINGS["maxLite"]), "pro": int(DEFAULT_SETTINGS["maxPro"]), "ultra": int(DEFAULT_SETTINGS["maxUltra"]), "testing": 1}
+        return maxes.get(plan, 1)
 
     async def start_process(self, user_id: int | str, plan: str) -> bool:
-        id_str = str(user_id)
-        current = self._in_progress_count.get(id_str, 0)
-        max_proc = self.get_max_process(plan, user_id)
-        if current >= max_proc:
+        uid = str(user_id)
+        active = await self.count_active_processes(user_id)
+        max_p = self.get_max_process(plan, user_id)
+        if active >= max_p:
             return False
-        self._in_progress_count[id_str] = current + 1
-        if supabase:
-            try:
-                await supabase.table("members").update(
-                    {"current_process": current + 1}
-                ).eq("user_id", id_str).execute()
-            except Exception:
-                pass
+        self._in_progress_count[uid] = self._in_progress_count.get(uid, 0) + 1
         return True
 
     async def end_process(self, user_id: int | str) -> None:
-        id_str = str(user_id)
-        current = self._in_progress_count.get(id_str, 0)
-        self._in_progress_count[id_str] = max(0, current - 1)
-        if supabase:
-            try:
-                await supabase.table("members").update(
-                    {"current_process": max(0, current - 1)}
-                ).eq("user_id", id_str).execute()
-            except Exception:
-                pass
+        uid = str(user_id)
+        if uid in self._in_progress_count and self._in_progress_count[uid] > 0:
+            self._in_progress_count[uid] -= 1
 
-    async def add_member(
-        self,
-        user_id: int | str,
-        plan: str,
-        days: int = 30,
-        testing_quota: int = 3,
-    ) -> None:
-        id_str = str(user_id)
+    async def add_member(self, user_id: int | str, plan: str, days: int) -> None:
+        uid = str(user_id)
         now = datetime.now(timezone.utc)
-        from datetime import timedelta
+        expire = (now + timedelta(days=days)).isoformat()
+        testing_quota = 5 if plan == "testing" else 0
 
-        expire = now + timedelta(days=days)
-        member = MemberData(
-            plan=plan,
-            expire_date=expire.isoformat(),
-            testing_quota=testing_quota,
-            active=True,
-            current_process=0,
+        db = await get_db()
+        await db.execute(
+            """INSERT INTO members (user_id, plan, expired, testing_quota, active, current_process, created_at)
+               VALUES (?, ?, ?, ?, 1, 0, ?)
+               ON CONFLICT(user_id) DO UPDATE SET plan=?, expired=?, testing_quota=?, active=1""",
+            (uid, plan, expire, testing_quota, now.isoformat(), plan, expire, testing_quota),
         )
-        self._members[id_str] = member
-        if supabase:
-            try:
-                await supabase.table("members").upsert(
-                    {
-                        "user_id": id_str,
-                        "plan": plan,
-                        "expired": expire.isoformat(),
-                        "testing_quota": testing_quota,
-                        "active": True,
-                        "current_process": 0,
-                    }
-                ).execute()
-            except Exception as exc:
-                logger.error("Error adding member: %s %s", id_str, exc)
+        await db.commit()
+
+        self._members[uid] = MemberData(
+            user_id=uid, plan=plan, expire_date=expire,
+            testing_quota=testing_quota, active=True,
+        )
 
     async def remove_member(self, user_id: int | str) -> None:
-        id_str = str(user_id)
-        self._members.pop(id_str, None)
-        if supabase:
-            try:
-                await supabase.table("members").delete().eq("user_id", id_str).execute()
-            except Exception:
-                pass
+        uid = str(user_id)
+        db = await get_db()
+        await db.execute("DELETE FROM members WHERE user_id=?", (uid,))
+        await db.commit()
+        self._members.pop(uid, None)
 
     async def has_used_trial(self, user_id: int | str) -> bool:
-        if supabase:
-            try:
-                resp = (
-                    await supabase.table("members")
-                    .select("user_id")
-                    .eq("user_id", str(user_id))
-                    .eq("plan", "testing")
-                    .execute()
-                )
-                return bool(resp.data)
-            except Exception:
-                pass
-        return False
+        uid = str(user_id)
+        db = await get_db()
+        try:
+            async with db.execute(
+                "SELECT user_id FROM members WHERE user_id=? AND plan='testing'", (uid,)
+            ) as cursor:
+                return await cursor.fetchone() is not None
+        except Exception:
+            return False
 
     async def enable_all(self) -> None:
+        db = await get_db()
+        await db.execute("UPDATE members SET active=1")
+        await db.commit()
         for m in self._members.values():
             m.active = True
-        if supabase:
-            try:
-                await supabase.table("members").update({"active": True}).neq("user_id", "").execute()
-            except Exception as exc:
-                logger.error("Error enabling all members: %s", exc)
 
     async def disable_all(self) -> None:
+        db = await get_db()
+        await db.execute("UPDATE members SET active=0")
+        await db.commit()
         for m in self._members.values():
             m.active = False
-        if supabase:
-            try:
-                await supabase.table("members").update({"active": False}).neq("user_id", "").execute()
-            except Exception as exc:
-                logger.error("Error disabling all members: %s", exc)
 
     async def delete_all(self) -> None:
+        db = await get_db()
+        await db.execute("DELETE FROM members")
+        await db.commit()
         self._members.clear()
-        if supabase:
-            try:
-                await supabase.table("members").delete().neq("user_id", "").execute()
-            except Exception as exc:
-                logger.error("Error deleting all members: %s", exc)
-
-    def get_all_members(self) -> dict[str, MemberData]:
-        return self._members
-
-    def get_members_by_plan(self, plan: str) -> list[str]:
-        return [
-            uid for uid, m in self._members.items() if m.plan == plan
-        ]
 
 
 member_manager = MemberManager()

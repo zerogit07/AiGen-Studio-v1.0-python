@@ -1,75 +1,57 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timezone
 
-from src.database.client import supabase
+from src.database.db import get_db
 
 logger = logging.getLogger(__name__)
 
 
 class UserManager:
     def __init__(self) -> None:
-        self._users: set[str] = set()
+        self._users: set[int] = set()
 
     async def load_users(self) -> None:
-        if not supabase:
-            return
+        db = await get_db()
         try:
-            resp = await supabase.table("users").select("id").execute()
-            for row in resp.data or []:
-                if row.get("id"):
-                    self._users.add(str(row["id"]))
-            logger.info("Loaded %d users from Supabase.", len(self._users))
+            async with db.execute("SELECT id FROM users") as cursor:
+                rows = await cursor.fetchall()
+            self._users = {row["id"] for row in rows}
+            logger.info("Loaded %d users.", len(self._users))
         except Exception as exc:
-            logger.error("Error loading users from Supabase: %s", exc)
+            logger.error("Error loading users: %s", exc)
 
-    async def add_user(
-        self,
-        user_id: int | str,
-        username: str | None = None,
-        first_name: str | None = None,
-        last_name: str | None = None,
-    ) -> None:
-        id_str = str(user_id)
-        if id_str not in self._users:
-            self._users.add(id_str)
-            if supabase:
-                async def _save():
-                    try:
-                        await supabase.table("users").upsert(
-                            {
-                                "id": int(id_str),
-                                "username": username or "",
-                                "first_name": first_name or "",
-                                "last_name": last_name or "",
-                                "joined_at": datetime.now(timezone.utc).isoformat(),
-                            },
-                            on_conflict="id",
-                        ).execute()
-                        logger.info("Saved new user %s to Supabase", id_str)
-                    except Exception as exc:
-                        logger.error("Error saving user %s to Supabase: %s", id_str, exc)
+    async def track_user(self, user_id: int, username: str = "", first_name: str = "", last_name: str = "") -> None:
+        if user_id in self._users:
+            return
+        self._users.add(user_id)
+        db = await get_db()
+        now = datetime.now(timezone.utc).isoformat()
+        await db.execute(
+            "INSERT OR REPLACE INTO users (id, username, first_name, last_name, joined_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, username or "", first_name or "", last_name or "", now),
+        )
+        await db.commit()
 
-                asyncio.create_task(_save())
-
-    async def get_user_data(self, user_id: int | str) -> dict | None:
-        if not supabase:
-            return None
+    async def get_user_data(self, user_id: int) -> dict | None:
+        db = await get_db()
         try:
-            resp = (
-                await supabase.table("users")
-                .select("*")
-                .eq("id", int(str(user_id)))
-                .single()
-                .execute()
-            )
-            return resp.data
+            async with db.execute("SELECT * FROM users WHERE id=?", (user_id,)) as cursor:
+                row = await cursor.fetchone()
+            if row:
+                return {
+                    "user_id": row["id"],
+                    "username": row["username"],
+                    "full_name": f"{row['first_name'] or ''} {row['last_name'] or ''}".strip(),
+                    "first_name": row["first_name"],
+                    "last_name": row["last_name"],
+                }
         except Exception:
-            return None
+            pass
+        return None
 
-    def get_all_users(self) -> list[str]:
+    def get_all_users(self) -> list[int]:
         return list(self._users)
 
 
